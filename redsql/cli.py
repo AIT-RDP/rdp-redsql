@@ -6,6 +6,9 @@ import argparse
 import logging
 import os
 import string
+from typing import Optional
+
+import dotenv
 
 import yaml
 
@@ -25,12 +28,28 @@ def main(argv=None, prog=None):
     parser = argparse.ArgumentParser(prog=prog, description="Feeds data from Redis to some SQL database")
     parser.add_argument("--config_file", metavar="CONF", default="redsql.yaml",
                         help="The main YAML configuration describing the translation process")
+    parser.add_argument("--env", metavar="ENV_FILE", default=None,
+                        help="An environment file that specifies the variables to load")
     args = parser.parse_args(args=argv)
 
+    # Load the environment variables and system configuration
+    load_env_file(args.env)
     logger.debug("Parse main YAML configuration file '%s'", args.config_file)
     config = load_config(args.config_file)
 
     pass  # TODO: Implement the main program flow
+
+
+def load_env_file(env_file: Optional[str]) -> None:
+    """
+    Populates the environment vairables by elements stored in the .env file
+
+    :param env_file: The path of the .env file or None, in case nothing should be changed
+    """
+
+    if env_file is not None:
+        logger.debug("Load environment file '%s'", env_file)
+        dotenv.load_dotenv(env_file)
 
 
 def load_config(config_file: str) -> dict:
