@@ -1,0 +1,2 @@
+include versioneer.py
+include redsql/_version.py
