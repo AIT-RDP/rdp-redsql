@@ -11,6 +11,11 @@ setup(
     license="Proprietary",
     url="https://gitlab-intern.ait.ac.at/ees/rdp/generic-components/redsql",
     setup_requires=["pytest-runner"],
-    install_requires=["pyyaml", "redis", "hiredis", "python-dotenv", "sqlalchemy", "psycopg2-binary"],
+    install_requires=[
+        "pyyaml>=6.0",
+        "redis>=4.3",
+        "python-dotenv>=0.20",
+        "sqlalchemy>=1.4"
+    ],
     test_requires=["pytest"],
 )
