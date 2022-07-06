@@ -5,6 +5,7 @@ Implements the main command line interface of RedSQL
 import argparse
 import logging
 import os
+import string
 
 import yaml
 
@@ -43,6 +44,8 @@ def load_config(config_file: str) -> dict:
     if not os.path.isfile(config_file):
         raise FileNotFoundError(f"The main configuration file '{config_file}' is not found")
 
+    yaml.add_constructor("!env-template", _load_substitute_env)
+
     with open(config_file, "r") as f:
         config = yaml.load(f, Loader=yaml.Loader)
 
@@ -50,3 +53,11 @@ def load_config(config_file: str) -> dict:
         raise SyntaxError("Invalid configuration version. Only version 1 is supported.")
 
     return config
+
+
+def _load_substitute_env(loader, node):
+    """Loads the YAML node by substituting environment variables using Python template syntax"""
+
+    template_str = loader.construct_scalar(node)
+    template = string.Template(template_str)
+    return template.substitute(**os.environ)
