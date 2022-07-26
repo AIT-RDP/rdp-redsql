@@ -5,18 +5,23 @@ import logging
 import threading
 from typing import Optional
 
+import redis
+import sqlalchemy.engine
+
 import redsql.channel as channel
 
 
 class ThreadChannelExecutor:
     """Executes the hosted channel in a dedicated thread"""
 
-    def __init__(self, channel_config: dict, channel_name: str = "<channel>",
-                 ext_channel: Optional[channel.Channel] = None):
+    def __init__(self, channel_config: dict, redis_pool: redis.ConnectionPool, sql_engine: sqlalchemy.engine.Engine,
+                 channel_name: str = "<channel>", ext_channel: Optional[channel.Channel] = None):
         """
         Initializes the channel executor.
 
         :param channel_config: The channel-specific configuration stanza
+        :param redis_pool: The shared Redis pool to draw the connections from
+        :param sql_engine: The SQL engine to draw the sql connections from
         :param channel_name: The name of the channel for debugging purpose
         :param ext_channel: An optional external channel to execute. The parameter is mainly intended for testing
             purpose. In case None is given, a channel object will be created.
@@ -30,6 +35,9 @@ class ThreadChannelExecutor:
         self._exit_event = threading.Event()
         self._thread = threading.Thread(target=self._run_channel)
 
+        self._redis_pool = redis_pool
+        self._sql_engine = sql_engine
+
     @property
     def channel(self) -> channel.Channel:
         """Returns the managed channel. (Mostly for testing purpose)"""
@@ -40,8 +48,12 @@ class ThreadChannelExecutor:
     def _run_channel(self):
         """Periodically executes the channel logic until a termination request is received"""
 
-        while not self._exit_event.is_set():
-            self._channel.execute_channel_once()
+        self._channel.open(self._redis_pool, self._sql_engine)
+        try:
+            while not self._exit_event.is_set():
+                self._channel.execute_channel_once()
+        finally:
+            self._channel.close()
 
     def start(self):
         """
