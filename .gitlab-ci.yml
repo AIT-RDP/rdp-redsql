@@ -13,10 +13,23 @@ variables:
 
 test_python_3_10:
   stage: build  # Docker-image creation and tests can run in parallel
+  services:
+    - name: docker.io/redis
+      alias: redis
+    - name: docker.io/postgres
+      alias: postgres
   tags:
     - docker
     - x86_64
   image: python:3.10-alpine
+  variables:
+    REDSQL_REDIS_HOST: "redis"
+    REDSQL_REDIS_PORT: "6379"
+    REDSQL_REDIS_DB: 0
+    POSTGRES_DB: "redsql_testing"
+    POSTGRES_USER: "postgres"
+    REDSQL_DB_URL: "postgresql://postgres:$POSTGRES_PASSWORD@postgres:5432/redsql_testing"
+
   script:
     - pip install -r requirements.txt
     - pip install pytest==7.1  # Dedicated testing requirements
