@@ -16,14 +16,14 @@ class MockupChannel(channel.Channel):
 
     def __init__(self):
         """Initializes the mockup"""
-        super(MockupChannel, self).__init__({}, "mockup-channel")
+        # don't call super(), to avoid the channel overhead
         self.exec_invocations = 0
         self.open_invocations = 0
         self.close_invocations = 0
 
     def open(self, redis_pool: redis.ConnectionPool, sql_engine: sql.engine.Engine):
         """Just counts the number of executions"""
-        super(MockupChannel, self).open(redis_pool, sql_engine)
+        # don't call super(), to avoid the channel overhead
         self.open_invocations += 1
 
     def execute_channel_once(self):
@@ -33,7 +33,7 @@ class MockupChannel(channel.Channel):
 
     def close(self):
         """Just counts the number of executions"""
-        super(MockupChannel, self).close()
+        # don't call super(), to avoid the channel overhead
         self.close_invocations += 1
 
 
