@@ -7,8 +7,10 @@ from typing import Optional, Dict, Any, List, Iterable
 
 import redis
 import sqlalchemy as sql
+import sqlalchemy.exc
 
 import redsql.steps.abc.step as abstract_step
+import redsql.exc as exc
 
 
 class _RedisStreamSource:
@@ -45,7 +47,7 @@ class _RedisStreamSource:
             self._redis_client.xgroup_create(name=self._stream_name, groupname=self._group_name, mkstream=True,
                                              id="0-0")  # Also consume messages before the group was created
         else:
-            self._logger.info(f"Try createing Redis group {self._group_name} on existing stream {self._stream_name}")
+            self._logger.info(f"Try creating Redis group {self._group_name} on existing stream {self._stream_name}")
             try:
                 # We cannot easily determine whether a group is already existing. Hence, try to create it and re-raise
                 # the error in case it is not the expected one. (Thx to Denis and CLUE Data Sync.)
@@ -144,8 +146,15 @@ class _SQLTableSink:
 
         output_data = list(map(self._remap_message, messages))
         self._logger.debug(f"Begin to inserted {len(output_data)} row(s) into {self._destination_table.name}")
-        with self._sql_connection.begin():  # Open a new transaction to avoid caching issues
-            self._sql_connection.execute(sql.insert(self._destination_table), output_data)
+        try:
+            with self._sql_connection.begin():  # Open a new transaction to avoid caching issues
+                self._sql_connection.execute(sql.insert(self._destination_table), output_data)
+        except sqlalchemy.exc.DataError as e:
+            new_err = exc.MessageFormatError(f"Unable to insert samples into {self._destination_table.name} using "
+                                             f"'{e.statement}' and params {e.params}: {e.detail}.",
+                                             triggering_message=e.params)
+            raise new_err from e
+
         self._logger.debug(f"Successfully inserted {len(output_data)} row(s) into {self._destination_table.name}")
 
     def _remap_message(self, message: Dict[str, Any]) -> Dict[str, Any]:
@@ -213,9 +222,17 @@ class Channel:
         if message is not None:
 
             output_messages = [message]
-            for step in self._transformation_steps:
-                output_messages = step.transform_messages(output_messages)
-            self._data_sink.insert_messages(output_messages)
+            try:
+                # Run the processing steps and push the result
+                for step in self._transformation_steps:
+                    output_messages = step.transform_messages(output_messages)
+                self._data_sink.insert_messages(output_messages)
+
+            except exc.MessageFormatError as e:
+                self._data_source.ack_last_message()  # Permanent error. Remove the message from the queue
+                e.external_message = message
+                raise
+
             self._data_source.ack_last_message()
 
     def close(self):
