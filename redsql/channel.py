@@ -42,13 +42,14 @@ class _RedisStreamSource:
 
         if not self._redis_client.exists(self._stream_name):
             self._logger.info(f"Create Redis group {self._group_name} and stream {self._stream_name}")
-            self._redis_client.xgroup_create(name=self._stream_name, groupname=self._group_name, mkstream=True)
+            self._redis_client.xgroup_create(name=self._stream_name, groupname=self._group_name, mkstream=True,
+                                             id="0-0")  # Also consume messages before the group was created
         else:
             self._logger.info(f"Try createing Redis group {self._group_name} on existing stream {self._stream_name}")
             try:
                 # We cannot easily determine whether a group is already existing. Hence, try to create it and re-raise
                 # the error in case it is not the expected one. (Thx to Denis and CLUE Data Sync.)
-                self._redis_client.xgroup_create(name=self._stream_name, groupname=self._group_name)
+                self._redis_client.xgroup_create(name=self._stream_name, groupname=self._group_name, id="0-0")
             except redis.exceptions.ResponseError as e:
                 if not "BUSYGROUP" in str(e):
                     raise
