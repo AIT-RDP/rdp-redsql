@@ -64,10 +64,11 @@ class _RedisStreamSource:
 
         message = self._redis_client.xreadgroup(self._group_name, self._consumer_name, {self._stream_name: ">"},
                                                 count=1, block=2000)
-        assert len(message) == 1, "Exactly one stream expected"
-        assert len(message[0][1]) <= 1, "At most one message expected"
-        if len(message[0][1]) >= 1:
+        assert len(message) <= 1, "At most one stream result expected"
+        if len(message) >= 1 and len(message[0][1]) >= 1:
+            assert len(message[0][1]) <= 1, "At most one message expected"
             assert message[0][0] == self._stream_name, "Received message from invalid stream"
+
             self._last_message_id = message[0][1][0][0]
             message_content = message[0][1][0][1]
             self._logger.debug(f"Received message {self._last_message_id} with keys {list(message_content.keys())}")

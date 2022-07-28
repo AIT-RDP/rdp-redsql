@@ -11,6 +11,7 @@ import sqlalchemy as sql
 import redsql.channel as channel
 import redsql.exc as exc
 
+
 @pytest.fixture()
 def reduced_channel_config() -> dict:
     """Exposes a minimal configuration to test the basic implementation"""
@@ -159,5 +160,12 @@ def test_channel_invalid_sql_type(reduced_channel_config, redis_pool, sql_engine
     }, index=[22]))
 
 
+def test_channel_without_messages(reduced_channel_config, redis_pool, sql_engine, test_table, redis_test_stream):
+    """Tests the channel without receiving a message"""
 
-# TODO: Test execute_channel_once() without a message
+    chn = channel.Channel(reduced_channel_config, "test channel")
+    chn.open(redis_pool, sql_engine)
+
+    chn.execute_channel_once()  # No message today
+
+    chn.close()
