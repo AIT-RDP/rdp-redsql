@@ -3,10 +3,174 @@ Defines facilities to manage channels transforming Redis input messages to SQL s
 """
 import logging
 import threading
-from typing import Optional
+from typing import Optional, Dict, Any, List, Iterable
 
 import redis
 import sqlalchemy as sql
+import sqlalchemy.exc
+
+import redsql.steps.abc.step as abstract_step
+import redsql.exc as exc
+
+
+class _RedisStreamSource:
+    """Helper class that fetches messages from the Redis database"""
+
+    def __init__(self, config: dict, redis_pool: redis.ConnectionPool, channel_name: str):
+        """
+        Initializes the stream source
+        :param config: The source-specific trigger stanza
+        :param redis_pool: The connection pool to set in the Redis client
+        :param channel_name: The name of the related channel for debugging and naming purpose
+        """
+
+        self._logger = logging.getLogger(f"{__name__}.{channel_name}")
+
+        self._logger.debug(f"Try to access the Redis instance via {redis_pool}")
+        self._redis_client = redis.Redis(connection_pool=redis_pool)
+        self._redis_client.ping()
+        self._logger.debug(f"Successfully connected to Redis")
+
+        self._stream_name = config["stream id"]
+        self._group_name = config.get("group id", f"group.{self._stream_name}.{channel_name}")
+        self._consumer_name = config.get("consumer id", f"consumer.{self._stream_name}.{channel_name}")
+
+        self._last_message_id = None
+
+        self._init_redis_streams()
+
+    def _init_redis_streams(self):
+        """Initialises a Redis stream if it has not already been initialized"""
+
+        if not self._redis_client.exists(self._stream_name):
+            self._logger.info(f"Create Redis group {self._group_name} and stream {self._stream_name}")
+            self._redis_client.xgroup_create(name=self._stream_name, groupname=self._group_name, mkstream=True,
+                                             id="0-0")  # Also consume messages before the group was created
+        else:
+            self._logger.info(f"Try creating Redis group {self._group_name} on existing stream {self._stream_name}")
+            try:
+                # We cannot easily determine whether a group is already existing. Hence, try to create it and re-raise
+                # the error in case it is not the expected one. (Thx to Denis and CLUE Data Sync.)
+                self._redis_client.xgroup_create(name=self._stream_name, groupname=self._group_name, id="0-0")
+            except redis.exceptions.ResponseError as e:
+                if not "BUSYGROUP" in str(e):
+                    raise
+
+    def get_next_message(self) -> Optional[Dict[str, Any]]:
+        """
+        Reads the next message or returns None, in case a timeout occurs
+        :return: The raw message
+        """
+
+        message = self._redis_client.xreadgroup(self._group_name, self._consumer_name, {self._stream_name: ">"},
+                                                count=1, block=2000)
+        assert len(message) <= 1, "At most one stream result expected"
+        if len(message) >= 1 and len(message[0][1]) >= 1:
+            assert len(message[0][1]) <= 1, "At most one message expected"
+            assert message[0][0] == self._stream_name, "Received message from invalid stream"
+
+            self._last_message_id = message[0][1][0][0]
+            message_content = message[0][1][0][1]
+            self._logger.debug(f"Received message {self._last_message_id} with keys {list(message_content.keys())}")
+        else:
+            self._last_message_id = None
+            message_content = None
+
+        return message_content
+
+    def ack_last_message(self):
+        """Acknowledges the last message before retrieving the next one"""
+        assert self._last_message_id is not None, "No message is left to acknowledge"
+        self._redis_client.xack(self._stream_name, self._group_name, self._last_message_id)
+        self._last_message_id = None
+
+
+class _SQLTableSink:
+    """
+    Helper class that allows to store messages in database tables
+
+    The class is specifically optimized to exploit the SQLAlchemy insertion mechanisms instead of less performant but
+    more generic SQL queries.
+    """
+
+    def __init__(self, config: dict, sql_engine: sql.engine.Engine, channel_name: str):
+        """
+
+        :param config: The SQL-specific configuration stanza
+        :param sql_engine: The DB engine to draw the connections from.
+        :param channel_name: The name of the corresponding channel for debugging purpose
+        """
+
+        self._logger = logging.getLogger(f"{__name__}.{channel_name}")
+
+        self._logger.debug(f"Try to access meta data from the SQL engine {sql_engine}")
+        self._sql_connection = sql_engine.connect()
+        self._sql_meta = sql.MetaData()
+        self._sql_meta.reflect(bind=self._sql_connection)
+        self._logger.debug(f"SQL schema successfully retrieved.")
+
+        self._destination_table = self._sql_meta.tables[config["table"]]
+        self._column_mapping = self._get_column_mapping(config["columns"], self._destination_table, channel_name)
+        self._logger.debug(f"Determine the column mapping of {self._destination_table.name}: {self._column_mapping}")
+
+    @staticmethod
+    def _get_column_mapping(column_config: dict, destination_table: sql.Table, channel_name: str) -> Dict[str, str]:
+        """
+        Returns the autocompleted mapping from table columns to message keys
+
+        :param column_config: The partial column definition from the configuration mapping column names to message
+            keys as well.
+        :param destination_table: The SQL table definition
+        :param channel_name: The channel name for debugging purpose
+        """
+
+        column_names = [col.name for col in destination_table.columns]
+
+        invalid_config_columns = set(column_config.keys()).difference(column_names)
+        if len(invalid_config_columns) > 0:
+            raise KeyError(f"The configuration of channel {channel_name}, table {destination_table.name} contains "
+                           f"invalid column names: {invalid_config_columns}. Available columns: {column_names}")
+
+        mapping = {col_name: column_config.get(col_name, col_name) for col_name in column_names}
+        return mapping
+
+    def insert_messages(self, messages: Iterable[Dict[str, Any]]):
+        """
+        Inserts the given messages into the database
+
+        Before inserting, the keys will be mapped according to the columns section in the configuration. In case some
+        columns are not defined in the configuration section, it is assumed that each message contains a key with the
+        respective column name.
+
+        :param messages: An iterable of messages. Each message must be composed of generic key-value pairs.
+        """
+
+        output_data = list(map(self._remap_message, messages))
+        self._logger.debug(f"Begin to inserted {len(output_data)} row(s) into {self._destination_table.name}")
+        try:
+            with self._sql_connection.begin():  # Open a new transaction to avoid caching issues
+                self._sql_connection.execute(sql.insert(self._destination_table), output_data)
+        except sqlalchemy.exc.DataError as e:
+            new_err = exc.MessageFormatError(f"Unable to insert samples into {self._destination_table.name} using "
+                                             f"'{e.statement}' and params {e.params}: {e.detail}.",
+                                             triggering_message=e.params)
+            raise new_err from e
+
+        self._logger.debug(f"Successfully inserted {len(output_data)} row(s) into {self._destination_table.name}")
+
+    def _remap_message(self, message: Dict[str, Any]) -> Dict[str, Any]:
+        """Extracts the column values from the message and returns them"""
+
+        sample_data = {
+            col_name: message[message_name]
+            for col_name, message_name in self._column_mapping.items() if message_name in message
+        }
+        return sample_data
+
+    def close(self):
+        """Closes the database connection and frees allocated resources"""
+        self._sql_connection.close()
+        self._sql_connection = None
 
 
 class Channel:
@@ -22,10 +186,12 @@ class Channel:
 
         self._logger = logging.getLogger(f"{__name__}.{channel_name}")
         self._config = channel_config
+        self._channel_name = channel_name
 
-        self._redis_client = None
-        self._sql_connection: Optional[sql.engine.Connection] = None
-        self._sql_meta: Optional[sql.MetaData] = None
+        self._data_source: Optional[_RedisStreamSource] = None
+        self._data_sink: Optional[_SQLTableSink] = None
+
+        self._transformation_steps: List[abstract_step.AbstractTransformationStep] = []
 
     def open(self, redis_pool: redis.ConnectionPool, sql_engine: sql.engine.Engine):
         """
@@ -37,16 +203,12 @@ class Channel:
         :param sql_engine: The possibly shared DB engine to create the connection from
         """
 
-        self._logger.debug(f"Try to access the Redis instance via {redis_pool}")
-        self._redis_client = redis.Redis(connection_pool=redis_pool)
-        self._redis_client.ping()
-        self._logger.debug(f"Successfully connected to Redis")
+        self._data_source = _RedisStreamSource(self._config["trigger"], redis_pool, self._channel_name)
+        self._data_sink = _SQLTableSink(self._config["data sink"], sql_engine, self._channel_name)
 
-        self._logger.debug(f"Try to access meta data from the SQL engine {sql_engine}")
-        self._sql_connection = sql_engine.connect()
-        self._sql_meta = sql.MetaData()
-        self._sql_meta.reflect(bind=self._sql_connection)
-        self._logger.debug(f"SQL schema successfully retrieved.")
+        self._logger.debug(f"Initialize external resources on all {len(self._transformation_steps)} steps.")
+        for step in self._transformation_steps:
+            step.open(sql_engine=sql_engine, redis_pool=redis_pool)
 
     def execute_channel_once(self):
         """
@@ -55,14 +217,33 @@ class Channel:
         In case no message is received, the function will run into a timeout and return without executing the pipeline.
         """
 
-        pass  # TODO: Implement
+        assert self._data_source is not None, "Need to open the channel before"
+
+        message = self._data_source.get_next_message()
+        if message is not None:
+
+            output_messages = [message]
+            try:
+                # Run the processing steps and push the result
+                for step in self._transformation_steps:
+                    output_messages = step.transform_messages(output_messages)
+                self._data_sink.insert_messages(output_messages)
+
+            except exc.MessageFormatError as e:
+                self._data_source.ack_last_message()  # Permanent error. Remove the message from the queue
+                e.external_message = message
+                raise
+
+            self._data_source.ack_last_message()
 
     def close(self):
         """
         Closes the Redis and DB connection.
         """
 
-        assert self._sql_connection is not None, "No SQL connection found. Call open(...) beforehand."
+        assert self._data_sink is not None, "No data sink found. Call open(...) beforehand."
 
-        self._sql_connection.close()
-        self._sql_connection = None
+        for step in self._transformation_steps:
+            step.close()
+
+        self._data_sink.close()

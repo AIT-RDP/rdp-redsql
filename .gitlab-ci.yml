@@ -21,7 +21,7 @@ test_python_3_10:
   tags:
     - docker
     - x86_64
-  image: python:3.10-alpine
+  image: python:3.10
   variables:
     REDSQL_REDIS_HOST: "redis"
     REDSQL_REDIS_PORT: "6379"
@@ -33,8 +33,8 @@ test_python_3_10:
 
   script:
     - pip install -r requirements.txt
-    - pip install pytest==7.1  # Dedicated testing requirements
-    - pytest --junitxml=report.xml --log-cli-level=INFO test
+    - pip install pytest==7.1 pandas==1.4.3 # Dedicated testing requirements
+    - pytest --junitxml=report.xml --log-cli-level=DEBUG test
   artifacts:  # Collect test results
     when: always
     paths:
