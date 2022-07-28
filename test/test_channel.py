@@ -62,8 +62,10 @@ def read_test_table(sql_engine: sql.engine.Engine) -> pd.DataFrame:
     with sql_engine.begin() as con:
         ret = pd.read_sql(sql.text("""
             SELECT dp_id, obs_time, value_int, value_float, value_text FROM test_table;
-        """), con)
-        return ret
+        """), con, index_col="dp_id")
+    ret = ret.sort_index()
+    ret.index.name = None  # Mare writing reference tables easier
+    return ret
 
 
 def test_channel_pass_through(reduced_channel_config, redis_pool, sql_engine, test_table):
@@ -92,12 +94,11 @@ def test_channel_pass_through(reduced_channel_config, redis_pool, sql_engine, te
 
     assert table_content is not None
     pd.testing.assert_frame_equal(table_content, pd.DataFrame({
-        "dp_id": [-1, 22],
         "obs_time": [None, None],
         "value_int": [666, 42],
         "value_float": [0.2, 0.9],
         "value_text": ["Nothing to add", "Let the HammerFall! \U0001F918"]
-    }))
+    }, index=[-1, 22]))
 
 
 # TODO: Test invalid data types

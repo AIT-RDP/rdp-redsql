@@ -5,7 +5,7 @@ dependencies:
   - python=3.10
   - pyyaml=6.0
   - sqlalchemy=1.4
-  - pytest=7.1  # Not needed for productive use
+  - pytest=7.1.2  # Not needed for productive use
   - pandas=1.4.3  # Not needed for productive use
   - pip=21.2
   - pip:

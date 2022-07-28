@@ -3,7 +3,7 @@ Defines facilities to manage channels transforming Redis input messages to SQL s
 """
 import logging
 import threading
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Iterable
 
 import redis
 import sqlalchemy as sql
@@ -79,6 +79,84 @@ class _RedisStreamSource:
         self._last_message_id = None
 
 
+class _SQLTableSink:
+    """
+    Helper class that allows to store messages in database tables
+
+    The class is specifically optimized to exploit the SQLAlchemy insertion mechanisms instead of less performant but
+    more generic SQL queries.
+    """
+
+    def __init__(self, config: dict, sql_engine: sql.engine.Engine, channel_name: str):
+        """
+
+        :param config: The SQL-specific configuration stanza
+        :param sql_engine: The DB engine to draw the connections from.
+        :param channel_name: The name of the corresponding channel for debugging purpose
+        """
+
+        self._logger = logging.getLogger(f"{__name__}.{channel_name}")
+
+        self._logger.debug(f"Try to access meta data from the SQL engine {sql_engine}")
+        self._sql_connection = sql_engine.connect()
+        self._sql_meta = sql.MetaData()
+        self._sql_meta.reflect(bind=self._sql_connection)
+        self._logger.debug(f"SQL schema successfully retrieved.")
+
+        self._destination_table = self._sql_meta.tables[config["table"]]
+        self._column_mapping = self._get_column_mapping(config["columns"], self._destination_table, channel_name)
+        self._logger.debug(f"Determine the column mapping of {self._destination_table.name}: {self._column_mapping}")
+
+    @staticmethod
+    def _get_column_mapping(column_config: dict, destination_table: sql.Table, channel_name: str) -> Dict[str, str]:
+        """
+        Returns the autocompleted mapping from table columns to message keys
+
+        :param column_config: The partial column definition from the configuration mapping column names to message
+            keys as well.
+        :param destination_table: The SQL table definition
+        :param channel_name: The channel name for debugging purpose
+        """
+
+        column_names = [col.name for col in destination_table.columns]
+
+        invalid_config_columns = set(column_config.keys()).difference(column_names)
+        if len(invalid_config_columns) > 0:
+            raise KeyError(f"The configuration of channel {channel_name}, table {destination_table.name} contains "
+                           f"invalid column names: {invalid_config_columns}. Available columns: {column_names}")
+
+        mapping = {col_name: column_config.get(col_name, col_name) for col_name in column_names}
+        return mapping
+
+    def insert_messages(self, messages: Iterable[Dict[str, Any]]):
+        """
+        Inserts the given messages into the database
+
+        Before inserting, the keys will be mapped according to the columns section in the configuration. In case some
+        columns are not defined in the configuration section, it is assumed that each message contains a key with the
+        respective column name.
+
+        :param messages: An iterable of messages. Each message must be composed of generic key-value pairs.
+        """
+
+        output_data = list(map(self._remap_message, messages))
+        self._sql_connection.execute(sql.insert(self._destination_table), output_data)
+
+    def _remap_message(self, message: Dict[str, Any]) -> Dict[str, Any]:
+        """Extracts the column values from the message and returns them"""
+
+        sample_data = {
+            col_name: message[message_name]
+            for col_name, message_name in self._column_mapping.items() if message_name in message
+        }
+        return sample_data
+
+    def close(self):
+        """Closes the database connection and frees allocated resources"""
+        self._sql_connection.close()
+        self._sql_connection = None
+
+
 class Channel:
     """A data pipeline with a unified set of processing steps"""
 
@@ -95,11 +173,9 @@ class Channel:
         self._channel_name = channel_name
 
         self._data_source: Optional[_RedisStreamSource] = None
+        self._data_sink: Optional[_SQLTableSink] = None
 
         self._transformation_steps: List[abstract_step.AbstractTransformationStep] = []
-
-        self._sql_connection: Optional[sql.engine.Connection] = None
-        self._sql_meta: Optional[sql.MetaData] = None
 
     def open(self, redis_pool: redis.ConnectionPool, sql_engine: sql.engine.Engine):
         """
@@ -112,16 +188,11 @@ class Channel:
         """
 
         self._data_source = _RedisStreamSource(self._config["trigger"], redis_pool, self._channel_name)
-
-        self._logger.debug(f"Try to access meta data from the SQL engine {sql_engine}")
-        self._sql_connection = sql_engine.connect()
-        self._sql_meta = sql.MetaData()
-        self._sql_meta.reflect(bind=self._sql_connection)
-        self._logger.debug(f"SQL schema successfully retrieved.")
+        self._data_sink = _SQLTableSink(self._config["data sink"], sql_engine, self._channel_name)
 
         self._logger.debug(f"Initialize external resources on all {len(self._transformation_steps)} steps.")
         for step in self._transformation_steps:
-            step.open(sql_connection=self._sql_connection, sql_engine=sql_engine, redis_pool=redis_pool)
+            step.open(sql_engine=sql_engine, redis_pool=redis_pool)
 
     def execute_channel_once(self):
         """
@@ -138,7 +209,7 @@ class Channel:
             output_messages = [message]
             for step in self._transformation_steps:
                 output_messages = step.transform_messages(output_messages)
-            # TODO: Write the messages to the DB
+            self._data_sink.insert_messages(output_messages)
             self._data_source.ack_last_message()
 
     def close(self):
@@ -146,10 +217,9 @@ class Channel:
         Closes the Redis and DB connection.
         """
 
-        assert self._sql_connection is not None, "No SQL connection found. Call open(...) beforehand."
+        assert self._data_sink is not None, "No data sink found. Call open(...) beforehand."
 
         for step in self._transformation_steps:
             step.close()
 
-        self._sql_connection.close()
-        self._sql_connection = None
+        self._data_sink.close()
