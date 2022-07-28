@@ -66,6 +66,7 @@ class _RedisStreamSource:
             assert message[0][0] == self._stream_name, "Received message from invalid stream"
             self._last_message_id = message[0][1][0][0]
             message_content = message[0][1][0][1]
+            self._logger.debug(f"Received message {self._last_message_id} with keys {list(message_content.keys())}")
         else:
             self._last_message_id = None
             message_content = None
@@ -140,9 +141,10 @@ class _SQLTableSink:
         """
 
         output_data = list(map(self._remap_message, messages))
+        self._logger.debug(f"Begin to inserted {len(output_data)} row(s) into {self._destination_table.name}")
         with self._sql_connection.begin():  # Open a new transaction to avoid caching issues
             self._sql_connection.execute(sql.insert(self._destination_table), output_data)
-        self._logger.debug(f"Successfully inserted {len(output_data)} rows into {self._destination_table.name}")
+        self._logger.debug(f"Successfully inserted {len(output_data)} row(s) into {self._destination_table.name}")
 
     def _remap_message(self, message: Dict[str, Any]) -> Dict[str, Any]:
         """Extracts the column values from the message and returns them"""
