@@ -59,7 +59,7 @@ def read_test_table(sql_engine: sql.engine.Engine) -> pd.DataFrame:
     :return: The entire test table content
     """
 
-    with sql_engine.begin() as con:
+    with sql_engine.connect() as con:
         ret = pd.read_sql(sql.text("""
             SELECT dp_id, obs_time, value_int, value_float, value_text FROM test_table;
         """), con, index_col="dp_id")

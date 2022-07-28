@@ -34,7 +34,7 @@ test_python_3_10:
   script:
     - pip install -r requirements.txt
     - pip install pytest==7.1 pandas==1.4.3 # Dedicated testing requirements
-    - pytest --junitxml=report.xml --log-cli-level=INFO test
+    - pytest --junitxml=report.xml --log-cli-level=DEBUG test
   artifacts:  # Collect test results
     when: always
     paths:

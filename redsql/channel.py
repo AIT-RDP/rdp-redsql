@@ -140,7 +140,9 @@ class _SQLTableSink:
         """
 
         output_data = list(map(self._remap_message, messages))
-        self._sql_connection.execute(sql.insert(self._destination_table), output_data)
+        with self._sql_connection.begin():  # Open a new transaction to avoid caching issues
+            self._sql_connection.execute(sql.insert(self._destination_table), output_data)
+        self._logger.debug(f"Successfully inserted {len(output_data)} rows into {self._destination_table.name}")
 
     def _remap_message(self, message: Dict[str, Any]) -> Dict[str, Any]:
         """Extracts the column values from the message and returns them"""
