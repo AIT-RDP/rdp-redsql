@@ -155,7 +155,13 @@ class _SQLTableSink:
                 self._sql_connection.execute(sql.insert(self._destination_table), output_data)
         except sqlalchemy.exc.DataError as e:
             new_err = exc.MessageFormatError(f"Unable to insert samples into {self._destination_table.name} using "
-                                             f"'{e.statement}' and params {e.params}: {e.detail}.",
+                                             f"'{e.statement}' and params {e.params}: {e.detail}, {e.orig}.",
+                                             triggering_message=e.params)
+            raise new_err from e
+        except sqlalchemy.exc.IntegrityError as e:
+            new_err = exc.MessageFormatError(f"Integrity error when inserting samples into "
+                                             f"{self._destination_table.name} using '{e.statement}' and params "
+                                             f"{e.params}: {e.detail}, {e.orig}",
                                              triggering_message=e.params)
             raise new_err from e
 
