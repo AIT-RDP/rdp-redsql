@@ -13,6 +13,9 @@ class SplitByKey(abstract_step.AbstractOneToManyStep):
 
     The step allows to define a set of keys that will be copied to every output message without splitting the input
     message. Additionally, renaming operations will be performed to unify the output representation.
+
+    To ease debugging and testing, the output messages will be sorted by the source output key value, i.e. the original
+    key.
     """
 
     def __init__(self, config: dict, channel_name: str, step_name: str, **kwargs):
@@ -42,8 +45,8 @@ class SplitByKey(abstract_step.AbstractOneToManyStep):
 
         include_keys = set(message.keys()).intersection(self._always_include)
         include_message = {key: message[key] for key in include_keys}
-        
-        split_keys = set(message.keys()).difference(self._always_include)
+
+        split_keys = sorted(set(message.keys()).difference(self._always_include))
         split_messages = map(lambda key: {
             self._destination_key: message[key],
             self._source_key: key,
