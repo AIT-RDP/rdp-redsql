@@ -160,6 +160,37 @@ def test_channel_invalid_sql_type(reduced_channel_config, redis_pool, sql_engine
     }, index=[22]))
 
 
+def test_channel_encoding(reduced_channel_config, redis_pool, sql_engine, test_table, redis_test_stream):
+    """Tests whether the encoding step is correctly set"""
+
+    reduced_channel_config["encoding"] = {
+        "obs_time": "JSONDatetimeString"
+    }
+
+    redis_client = redis.Redis(connection_pool=redis_pool)
+    redis_client.xadd("test.stream", {
+        "obs_time": "\"2022-08-01T12:00:00Z\"",
+        "my int": 666,
+        "my float": 0.2,
+        "dp_id": -1
+    })
+
+    chn = channel.Channel(reduced_channel_config, "test channel")
+    chn.open(redis_pool, sql_engine)
+    chn.execute_channel_once()
+    chn.close()
+
+    table_content = read_test_table(sql_engine)
+
+    assert table_content is not None
+    pd.testing.assert_frame_equal(table_content, pd.DataFrame({
+        "obs_time": [datetime.datetime(2022, 8, 1, 12, 0, tzinfo=datetime.timezone.utc)],
+        "value_int": [666],
+        "value_float": [0.2],
+        "value_text": ["Nothing to add"]
+    }, index=[-1]))
+
+
 def test_channel_without_messages(reduced_channel_config, redis_pool, sql_engine, test_table, redis_test_stream):
     """Tests the channel without receiving a message"""
 
