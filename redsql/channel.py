@@ -10,6 +10,7 @@ import sqlalchemy as sql
 import sqlalchemy.exc
 
 import redsql.steps.abc.step as abstract_step
+import redsql.steps.decoding as decoding_step
 import redsql.exc as exc
 
 
@@ -191,7 +192,10 @@ class Channel:
         self._data_source: Optional[_RedisStreamSource] = None
         self._data_sink: Optional[_SQLTableSink] = None
 
-        self._transformation_steps: List[abstract_step.AbstractTransformationStep] = []
+        self._transformation_steps: List[abstract_step.AbstractTransformationStep] = [
+            decoding_step.DecodingStep(config=channel_config.get("encoding", {}), channel_name=channel_name,
+                                       step_name="0-decoding")
+        ]
 
     def open(self, redis_pool: redis.ConnectionPool, sql_engine: sql.engine.Engine):
         """
