@@ -266,3 +266,37 @@ def test_channel_transformation(reduced_channel_config, redis_pool, sql_engine, 
         "value_float": [0.2],
         "value_text": ["step-test channel:step-2:second:step-test channel:step-1:first:"]
     }, index=[-1]))
+
+
+def test_channel_step_instantiation(reduced_channel_config, redis_pool, sql_engine, test_table, redis_test_stream):
+    """Tests the step instantiation that dynamically loads default processing steps"""
+
+    redis_client = redis.Redis(connection_pool=redis_pool)
+    redis_client.xadd("test.stream", {
+        "dp_id": -1,
+        "source a": 41.99,
+        "source b": 42.01
+    })
+
+    reduced_channel_config["steps"] = [{
+        "type": "SplitByKey",
+        "always include": ["dp_id"],
+        "destination key": "my float",
+        "source output key": "value_text"
+    }]
+    chn = channel.Channel(reduced_channel_config, "test channel")
+
+    chn.open(redis_pool, sql_engine)
+    chn.execute_channel_once()
+    chn.close()
+
+    table_content = read_test_table(sql_engine)
+
+    assert table_content is not None
+    table_content = table_content.sort_values("value_text", axis="index")
+    pd.testing.assert_frame_equal(table_content, pd.DataFrame({
+        "obs_time": [None, None],
+        "value_int": [42, 42],
+        "value_float": [41.99, 42.01],
+        "value_text": ["source a", "source b"]
+    }, index=[-1, -1]))

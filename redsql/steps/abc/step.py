@@ -3,6 +3,7 @@ Hosts the interface to the abstract processing step
 """
 
 import abc
+import itertools
 from typing import Iterable, Dict, Any
 
 
@@ -73,3 +74,33 @@ class AbstractOneToOneStep(AbstractTransformationStep, abc.ABC):
         """
 
         return map(self.transform_single_message, message_input)
+
+
+class AbstractOneToManyStep(AbstractTransformationStep, abc.ABC):
+    """
+    Abstract step that splits one message into multiple output messages
+
+    The class is mostly defined as a convenience function to reduce the complexity of the iterator-based interface of
+    AbstractTransformationStep.
+    """
+
+    @abc.abstractmethod
+    def transform_single_message(self, message: Dict[str, Any]) -> Iterable[Dict[str, Any]]:
+        """
+        Transforms the input message into multiple output message
+
+        :param message: The input message in the usual key-value format
+        :return: The transformed output messages
+        """
+
+        pass
+
+    def transform_messages(self, message_input: Iterable[Dict[str, Any]]) -> Iterable[Dict[str, Any]]:
+        """
+        Transforms the input messages to a series of output messages having the same number of elements
+
+        :param message_input: The series of input messages to process.
+        :return: An iterable that may hold an arbitrary amount of output messages
+        """
+
+        return itertools.chain.from_iterable(map(self.transform_single_message, message_input))
