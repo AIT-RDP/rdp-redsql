@@ -131,6 +131,10 @@ def test_channel_invalid_sql_type(reduced_channel_config, redis_pool, sql_engine
         "my float": "roughly-pi",  # ERROR: should be a floating point number
         "dp_id": -1
     })
+    redis_client.xadd("test.stream", {
+        "my float": 0.9
+        # ERROR: no mandatory dp_id field
+    })
 
     # Add a correct message to check whether the channel can still correctly handle new messages:
     redis_client.xadd("test.stream", {
@@ -146,6 +150,8 @@ def test_channel_invalid_sql_type(reduced_channel_config, redis_pool, sql_engine
     with pytest.raises(exc.MessageFormatError, match=r"definitely\-no\-number"):
         chn.execute_channel_once()
     with pytest.raises(exc.MessageFormatError, match=r"roughly\-pi"):
+        chn.execute_channel_once()
+    with pytest.raises(exc.MessageFormatError, match=r"dp_id"):
         chn.execute_channel_once()
     chn.execute_channel_once()
 
