@@ -7,7 +7,7 @@ class itself may be statically instantiated to improve the readability of the co
 import datetime
 import json
 import logging
-from typing import Dict, Any, Callable
+from typing import Dict, Any, Callable, List
 
 import dateutil.parser
 
@@ -40,8 +40,10 @@ class DecodingStep(abstract_step.AbstractOneToOneStep):
 
         available_decoders = {
             "KeepEncoding": lambda x: x,
+            "DatetimeString": self._decode_iso_datetime,
             "JSON": self._decode_json,
             "JSONDatetimeString": self._decode_json_iso_datetime,
+            "JSONListWithDatetimeStrings": self._decode_json_list_with_iso_string
         }
 
         message_decoders = {}
@@ -67,13 +69,28 @@ class DecodingStep(abstract_step.AbstractOneToOneStep):
             raise exc.MessageFormatError(f"Invalid JSON string found: {value}") from e
 
     @staticmethod
-    def _decode_json_iso_datetime(value: str) -> datetime.datetime:
-        """Decodes the JSON string into a datetime"""
-        value = DecodingStep._decode_json(value)
+    def _decode_iso_datetime(value: str) -> datetime.datetime:
+        """Decodes the unescaped string value into a datetime object"""
         try:
             return dateutil.parser.isoparse(value)
         except dateutil.parser.ParserError as e:
             raise exc.MessageFormatError(f"Invalid ISO Timestamp: {value}") from e
+        except ValueError as e:
+            raise exc.MessageFormatError(f"Invalid ISO Timestamp: {value}") from e
+
+    @staticmethod
+    def _decode_json_iso_datetime(value: str) -> datetime.datetime:
+        """Decodes the JSON string into a datetime"""
+        value = DecodingStep._decode_json(value)
+        return DecodingStep._decode_iso_datetime(value)
+
+    @staticmethod
+    def _decode_json_list_with_iso_string(value: str) -> List[datetime.datetime]:
+        """Decodes the list of timestamps"""
+        value_list = DecodingStep._decode_json(value)
+        if not isinstance(value_list, list):
+            raise exc.MessageFormatError(f"The JSON string '{value}' does not decode a list but a {type(value_list)}.")
+        return [DecodingStep._decode_iso_datetime(v) for v in value_list]
 
     def transform_single_message(self, message: Dict[str, Any]) -> Dict[str, Any]:
         """Transforms the input message using the configured decoding rules and returns the result."""
