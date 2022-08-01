@@ -2,6 +2,7 @@
 Specifically tests the channel functionality that reads messages from Redis and relays them to the database
 """
 import datetime
+from typing import Dict, Any
 
 import pandas as pd
 import pytest
@@ -10,6 +11,7 @@ import sqlalchemy as sql
 
 import redsql.channel as channel
 import redsql.exc as exc
+import redsql.steps.abc.step as abstract_step
 
 
 @pytest.fixture()
@@ -200,3 +202,67 @@ def test_channel_without_messages(reduced_channel_config, redis_pool, sql_engine
     chn.execute_channel_once()  # No message today
 
     chn.close()
+
+
+class MockupStep(abstract_step.AbstractOneToOneStep):
+    """Mockup to test the instantiation of transformation steps"""
+
+    def __init__(self, channel_name, step_name, config, **kwargs):
+        super(MockupStep, self).__init__(**kwargs)
+
+        assert len(kwargs) == 0
+        self.channel_name = channel_name
+        self.step_name = step_name
+        self.config = config
+
+        self.state = "no-open"
+
+    def open(self, **kwargs):
+        assert self.state == "no-open"
+        self.state = "open"
+
+    def transform_single_message(self, message: Dict[str, Any]) -> Dict[str, Any]:
+        assert self.state == "open"
+
+        message = message.copy()
+        old_txt = message.get("value_text", "")
+        message["value_text"] = f"step-{self.channel_name}:{self.step_name}:{self.config.get('msg', '')}:{old_txt}"
+        return message
+
+    def close(self):
+        assert self.state == "open"
+        self.state = "closed"
+
+    def __del__(self):
+        assert self.state in ["closed", "no-open"]
+
+
+def test_channel_transformation(reduced_channel_config, redis_pool, sql_engine, test_table, redis_test_stream):
+    """Tests two simple mockup transformation steps"""
+
+    redis_client = redis.Redis(connection_pool=redis_pool)
+    redis_client.xadd("test.stream", {
+        "my int": 666,
+        "my float": 0.2,
+        "dp_id": -1
+    })
+
+    reduced_channel_config["steps"] = [
+        {"type": "test_channel.MockupStep", "msg": "first"},
+        {"type": "test_channel.MockupStep", "msg": "second"},
+    ]
+    chn = channel.Channel(reduced_channel_config, "test channel")
+
+    chn.open(redis_pool, sql_engine)
+    chn.execute_channel_once()
+    chn.close()
+
+    table_content = read_test_table(sql_engine)
+
+    assert table_content is not None
+    pd.testing.assert_frame_equal(table_content, pd.DataFrame({
+        "obs_time": [None],
+        "value_int": [666],
+        "value_float": [0.2],
+        "value_text": ["step-test channel:step-2:second:step-test channel:step-1:first:"]
+    }, index=[-1]))

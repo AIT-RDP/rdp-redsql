@@ -1,6 +1,8 @@
 """
 Defines facilities to manage channels transforming Redis input messages to SQL statements
 """
+import importlib
+import inspect
 import logging
 import threading
 from typing import Optional, Dict, Any, List, Iterable
@@ -196,6 +198,62 @@ class Channel:
             decoding_step.DecodingStep(config=channel_config.get("encoding", {}), channel_name=channel_name,
                                        step_name="0-decoding")
         ]
+
+        step_config = channel_config.get("steps", [])
+        self._transformation_steps += self._instantiate_steps(step_config, channel_name, self._logger)
+
+    @staticmethod
+    def _instantiate_steps(step_config: list, channel_name: str,
+                           logger: logging.Logger) -> List[abstract_step.AbstractTransformationStep]:
+        """
+        Dynamically instantiates the processing steps according to the configuration
+
+        :param step_config: The step-specific configuration stanza
+        :param channel_name: The channel_name for debugging purpose
+        :param logger: Some logger to output debugging information
+        """
+
+        step_config = {f"step-{i + 1}": cfg for i, cfg in enumerate(step_config)}  # Create a name for every step
+        steps = [
+            Channel._instantiate_step(cfg, channel_name, step_name, logger)
+            for step_name, cfg in step_config.items()
+        ]
+        logger.debug(f"Instantiated all {len(steps)} transformation steps of channel '{channel_name}'")
+        return steps
+
+    @staticmethod
+    def _instantiate_step(step_config: dict, channel_name: str, step_name: str,
+                          logger: logging.Logger) -> abstract_step.AbstractTransformationStep:
+        """
+        Dynamically instantiates the configured transformation step and returns it
+
+        :param step_config: The step-specific configuration stanza
+        :param channel_name: The channel_name for debugging purpose
+        :param step_name: The name of the step for debugging purpose
+        :param logger: Some logger to output debugging information
+        """
+
+        type_name = step_config["type"]
+        name_components = str(type_name).split(".")
+        class_name = name_components[-1]
+        if len(name_components) <= 1:
+            module_name = "redsql.steps"
+        else:
+            module_name = ".".join(name_components[:-1])
+
+        logger.debug(f"Instantiate step {step_name} as class {class_name} in {module_name}.")
+        step_module = importlib.import_module(module_name)
+        assert step_module is not None
+
+        step_class: type = getattr(step_module, name_components[-1])
+        if not inspect.isclass(step_class):
+            raise ModuleNotFoundError(f"The specified step class '{type_name}' ({step_class}) is not a class.")
+        if not issubclass(step_class, abstract_step.AbstractTransformationStep):
+            raise ModuleNotFoundError(f"The specified step class '{type_name}' ({step_class}) is not an "
+                                      f"AbstractTransformationStep.")
+
+        step_object = step_class(config=step_config, channel_name=channel_name, step_name=step_name)
+        return step_object
 
     def open(self, redis_pool: redis.ConnectionPool, sql_engine: sql.engine.Engine):
         """
