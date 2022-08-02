@@ -60,3 +60,24 @@ def test_split_by_key_extensive():
         "dp id": 1
     }]
     assert output_messages == reference_message
+
+
+def test_unpack_array_values():
+    """Tests the unpack step"""
+
+    step = partitioning.UnpackArrayValues({"unpack keys": ["arr_a", "arr_b"]}, channel_name="<>", step_name="<>")
+
+    input_messages = [
+        {"arr_a": ["one", "two"], "arr_b": [15, 23], "meta": "lab"},
+        {"arr_a": [], "arr_b": [], "meta": "void"},
+    ]
+
+    step.open()
+    output_messages = list(step.transform_messages(input_messages))
+    step.close()
+
+    reference_messages = [
+        {"arr_a": "one", "arr_b": 15, "meta": "lab"},
+        {"arr_a": "two", "arr_b": 23, "meta": "lab"}
+    ]
+    assert output_messages == reference_messages
