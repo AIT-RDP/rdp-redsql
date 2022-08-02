@@ -6,7 +6,11 @@
 version: 1
 
 # The list of channel configurations. Each configuration specifies a single chain of processing steps
-channels: []
+channels: {}
 
 # The connection to the destination database
 database connection: !env-template "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}/${POSTGRES_DB}"
+redis:
+  host: !env-template "${REDSQL_REDIS_HOST}"
+  port: !env-template "${REDSQL_REDIS_PORT}"
+  db: !env-template "${REDSQL_REDIS_DB}"
