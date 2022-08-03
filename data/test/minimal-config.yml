@@ -3,3 +3,4 @@ version: 1
 channels: []
 
 database connection: !env-template "postgresql://${DB_CRED}@${DB_HOST}"
+redis: {}

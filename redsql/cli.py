@@ -5,12 +5,17 @@ Implements the main command line interface of RedSQL
 import argparse
 import logging
 import os
+import signal
 import string
+import time
 from typing import Optional
 
 import dotenv
-
+import redis
+import sqlalchemy as sql
 import yaml
+
+import redsql.channel_executor as executor
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +42,93 @@ def main(argv=None, prog=None):
     logger.debug("Parse main YAML configuration file '%s'", args.config_file)
     config = load_config(args.config_file)
 
-    pass  # TODO: Implement the main program flow
+    redis_pool = _load_redis_connection_pool(config)
+    sql_engine = _load_db_engine(config)
+
+    channel_executors = _startup_executors(config, redis_pool, sql_engine)
+
+    logger.info(f"Startup of {len(channel_executors)} channel(s) complete, press Ctrl+C to exit the data crawler.")
+    _wait_for_termination_request()
+
+    logger.info(f"Begin to shutdown the data crawler.")
+    _stop_executors(channel_executors)
+    logger.info("Bye!")
+
+
+def _wait_for_termination_request():
+    """suspends the main thread until a termination request was received"""
+
+    def _handler(signal_number, _frame):
+        logger.debug(f"Received signal {signal_number}. Initiate shutdown.")
+        raise KeyboardInterrupt("The end is near!")
+
+    # Install the signal handlers
+    signal_codes = ("SIGTERM", "SIGINT", "SIGBREAK", "SIGHUP")
+    for code in signal_codes:
+        # Some signals are not defined on Unix/Windows :-(
+        signal_nr = getattr(signal, code, None)
+        if signal_nr is not None:
+            signal.signal(signal_nr, _handler)
+
+    # Sleep until a KeyboardInterrupt it caught
+    # Using an event rather than an exception would be nicer, but exit_event.wait() blocks the signal handler.
+    try:
+        while True:
+            time.sleep(10)
+    except KeyboardInterrupt:
+        pass
+
+
+def _startup_executors(config: dict, redis_pool: redis.ConnectionPool, sql_engine: sql.engine.Engine) -> dict:
+    """Creates the executors and starts them"""
+
+    channel_config: dict = config["channels"]
+    channel_executors = {
+        ex_name: executor.ThreadChannelExecutor(cnf, redis_pool, sql_engine, ex_name)
+        for ex_name, cnf in channel_config.items()
+    }
+
+    for ex in channel_executors.values():
+        ex.start()
+    return channel_executors
+
+
+def _stop_executors(channel_executors: dict):
+    """Stops the channel executors and waits until they are finished"""
+
+    for ex in channel_executors.values():
+        ex.stop()
+
+    for ex in channel_executors.values():
+        ex.join()
+
+
+def _load_db_engine(config) -> sql.engine.Engine:
+    """Parses the configuration to load the DB engine"""
+
+    engine_url = config["database connection"]
+    engine = sql.create_engine(engine_url)
+    engine.connect()
+    logger.debug(f"Connected to the database {engine.name}.")
+
+    return engine
+
+
+def _load_redis_connection_pool(config: dict) -> redis.ConnectionPool:
+    """Parses the configuration and instantiates the Redis connection pool"""
+
+    redis_config: dict = config["redis"]
+    host = redis_config["host"]
+    port = redis_config["port"]
+    db = redis_config["db"]
+    logger.debug(f"Configure redis connection to {host}:{port} using db {db}")
+
+    pool = redis.ConnectionPool(host=host, port=port, db=db)
+    client = redis.Redis(connection_pool=pool)
+    client.ping()  # Will raise an exception in case a connection error occurs
+    logger.debug(f"Redis connection to {host}:{port} using db {db} is alive.")
+
+    return pool
 
 
 def load_env_file(env_file: Optional[str]) -> None:

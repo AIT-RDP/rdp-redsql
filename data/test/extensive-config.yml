@@ -1,0 +1,44 @@
+# ----------------------------------------------------------------------------------------------------------------------
+# An extensive RedSQL configuration that aims at instantiating most steps
+# ----------------------------------------------------------------------------------------------------------------------
+
+# The version of the configuration file. Currently, only version 1 is supported.
+version: 1
+
+# The list of channel configurations. Each configuration specifies a single chain of processing steps
+channels:
+  forecasts_weather:
+    trigger:
+      stream id: "forecasts.weather"
+    encoding:
+      _default: "JSON"
+      forecast_time: "JSONDatetimeString"
+      observation_time: "JSONListWithDatetimeStrings"
+    steps:
+      - type: "SplitByKey"
+        always include: ["forecast_time", "observation_time", "latitude", "longitude", "altitude", "station", "data_provider"]
+        destination key: "value"
+        source output key: "observation_type"
+      - type: "CachedSQLQuery"
+        cache keys: ["station", "data_provider", "observation_type"]
+        single value: True
+        query: "
+            SELECT id AS dp_id FROM data_points 
+              WHERE name=:observation_type AND data_provider=:data_provider AND location_code=:station
+          "
+      - type: "UnpackArrayValues"
+        unpack keys: ["observation_time", "value"]
+    data sink:
+      table: "forecasts"
+      columns:
+        dp_id: "dp_id"
+        obs_time: "observation_time"
+        fc_time: "forecast_time"
+        value: "value"
+
+# The connection to the destination database
+database connection: !env-template "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}/${POSTGRES_DB}"
+redis:
+  host: !env-template "${REDSQL_REDIS_HOST}"
+  port: !env-template "${REDSQL_REDIS_PORT}"
+  db: !env-template "${REDSQL_REDIS_DB}"
