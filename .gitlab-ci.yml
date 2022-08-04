@@ -86,7 +86,6 @@ release-image-main:
   only:
     - main
     - master
-    - 18-tag-docker-images-more-granually
 
 # release the latest-dev tag
 release-image-tag:
@@ -109,7 +108,6 @@ release-image-dev:
     - shell
   only:
     - development
-    - 18-tag-docker-images-more-granually
 
 # Removes any local docker image to avoid littering the build host
 cleanup-images:
