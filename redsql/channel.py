@@ -116,6 +116,8 @@ class _SQLTableSink:
         self._column_mapping = self._get_column_mapping(config["columns"], self._destination_table, channel_name)
         self._logger.debug(f"Determine the column mapping of {self._destination_table.name}: {self._column_mapping}")
 
+        self._update_duplicate = config.get("update duplicate values", False)
+
     @staticmethod
     def _get_column_mapping(column_config: dict, destination_table: sql.Table, channel_name: str) -> Dict[str, str]:
         """
@@ -154,7 +156,8 @@ class _SQLTableSink:
         self._logger.debug(f"Begin to insert {len(output_data)} row(s) into {self._destination_table.name}")
         try:
             with self._sql_connection.begin():  # Open a new transaction to avoid caching issues
-                self._sql_connection.execute(sql.insert(self._destination_table), output_data)
+                self._sql_connection.execute(self._compile_insert_statement(), output_data)
+
         except sqlalchemy.exc.DataError as e:
             new_err = exc.MessageFormatError(f"Unable to insert samples into {self._destination_table.name} using "
                                              f"'{e.statement}' and params {e.params}: {e.detail}, {e.orig}.",
@@ -168,6 +171,30 @@ class _SQLTableSink:
             raise new_err from e
 
         self._logger.debug(f"Successfully inserted {len(output_data)} row(s) into {self._destination_table.name}")
+
+    def _compile_insert_statement(self):
+        """Compiles the SqlAlchemy insert statement according to the given configuration and returns it"""
+
+        if self._update_duplicate:
+            import sqlalchemy.dialects.postgresql as pg_dialect  # Requires PostgreSQL
+
+            primary_keys = [c for c in self._destination_table.constraints if isinstance(c, sql.PrimaryKeyConstraint)]
+            if len(primary_keys) != 1:
+                raise ValueError(f"It is requested to update duplicate values but {self._destination_table.name} "
+                                 f"does not have a unique primary key: {primary_keys}")
+
+            ins_stmt = pg_dialect.insert(self._destination_table)
+
+            update_mapping = {
+                # PG creates an intermediate excluded table for all invalid statements that needs to be referenced
+                col: getattr(ins_stmt.excluded, col.name)
+                for col in self._destination_table.columns if col.name not in primary_keys[0].columns
+            }
+            ins_stmt = ins_stmt.on_conflict_do_update(constraint=primary_keys[0].name, set_=update_mapping)
+        else:
+            ins_stmt = sql.insert(self._destination_table)
+
+        return ins_stmt
 
     def _remap_message(self, message: Dict[str, Any]) -> Dict[str, Any]:
         """Extracts the column values from the message and returns them"""
