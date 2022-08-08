@@ -163,7 +163,7 @@ class _SQLTableSink:
                 col: getattr(ins_stmt.excluded, col.name)
                 for col in destination_table.columns if col.name not in primary_keys[0].columns
             }
-            ins_stmt = ins_stmt.on_conflict_do_update(constraint=primary_keys[0].name, set_=update_mapping)
+            ins_stmt = ins_stmt.on_conflict_do_update(index_elements=list(primary_keys[0].columns), set_=update_mapping)
         else:
             ins_stmt = sql.insert(destination_table)
 
