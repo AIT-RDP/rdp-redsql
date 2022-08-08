@@ -52,8 +52,15 @@ class ThreadChannelExecutor:
         try:
             while not self._exit_event.is_set():
                 self._channel.execute_channel_once()
+                self._flush_loggers()
+
         finally:
             self._channel.close()
+
+    def _flush_loggers(self):
+        """Flushes the loggers to see immediate outputs"""
+        for handler in self._logger.handlers:
+            handler.flush()
 
     def start(self):
         """
