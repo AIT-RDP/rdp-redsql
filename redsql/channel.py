@@ -116,6 +116,11 @@ class _SQLTableSink:
         self._column_mapping = self._get_column_mapping(config["columns"], self._destination_table, channel_name)
         self._logger.debug(f"Determine the column mapping of {self._destination_table.name}: {self._column_mapping}")
 
+        self._insert_statement = self._compile_insert_statement(
+            self._destination_table, self._logger,
+            update_duplicates=config.get("update duplicate values", False)
+        )
+
     @staticmethod
     def _get_column_mapping(column_config: dict, destination_table: sql.Table, channel_name: str) -> Dict[str, str]:
         """
@@ -137,6 +142,34 @@ class _SQLTableSink:
         mapping = {col_name: column_config.get(col_name, col_name) for col_name in column_names}
         return mapping
 
+    @staticmethod
+    def _compile_insert_statement(destination_table: sql.Table, logger: logging.Logger,
+                                  update_duplicates: bool = False):
+        """Compiles the SqlAlchemy insert statement according to the given configuration and returns it"""
+
+        if update_duplicates:
+            logger.debug(f"Update duplicate values in {destination_table.name}. This feature requires PostgreSQL.")
+            import sqlalchemy.dialects.postgresql as pg_dialect  # Requires PostgreSQL
+
+            primary_keys = [c for c in destination_table.constraints if isinstance(c, sql.PrimaryKeyConstraint)]
+            if len(primary_keys) != 1:
+                raise ValueError(f"It is requested to update duplicate values but {destination_table.name} "
+                                 f"does not have a unique primary key: {primary_keys}")
+
+            ins_stmt = pg_dialect.insert(destination_table)
+
+            update_mapping = {
+                # PG creates an intermediate excluded table for all invalid statements that needs to be referenced
+                col: getattr(ins_stmt.excluded, col.name)
+                for col in destination_table.columns if col.name not in primary_keys[0].columns
+            }
+            ins_stmt = ins_stmt.on_conflict_do_update(index_elements=list(primary_keys[0].columns), set_=update_mapping)
+        else:
+            ins_stmt = sql.insert(destination_table)
+
+        logger.debug(f"Compiled insert statement: {ins_stmt}")
+        return ins_stmt
+
     def insert_messages(self, messages: Iterable[Dict[str, Any]]):
         """
         Inserts the given messages into the database
@@ -154,7 +187,8 @@ class _SQLTableSink:
         self._logger.debug(f"Begin to insert {len(output_data)} row(s) into {self._destination_table.name}")
         try:
             with self._sql_connection.begin():  # Open a new transaction to avoid caching issues
-                self._sql_connection.execute(sql.insert(self._destination_table), output_data)
+                self._sql_connection.execute(self._insert_statement, output_data)
+
         except sqlalchemy.exc.DataError as e:
             new_err = exc.MessageFormatError(f"Unable to insert samples into {self._destination_table.name} using "
                                              f"'{e.statement}' and params {e.params}: {e.detail}, {e.orig}.",

@@ -54,6 +54,29 @@ def test_table(sql_engine: sql.engine.Engine) -> str:
             DROP TABLE test_table;
         """))
 
+@pytest.fixture()
+def test_table_indexed(sql_engine: sql.engine.Engine) -> str:
+    """temporary creates an indexed testing table and returns its name"""
+
+    with sql_engine.begin() as con:
+        con.execute(sql.text("""
+            CREATE TABLE test_table_indexed (
+                dp_id INTEGER NOT NULL,
+                obs_time TIMESTAMPTZ DEFAULT NULL,
+                value_int INTEGER NOT NULL DEFAULT 42,
+                value_float DOUBLE PRECISION,
+                value_text TEXT DEFAULT 'Nothing to add',
+                PRIMARY KEY (dp_id)
+            );
+        """))
+
+    yield "test_table_indexed"
+
+    with sql_engine.begin() as con:
+        con.execute(sql.text("""
+            DROP TABLE test_table_indexed;
+        """))
+
 
 @pytest.fixture()
 def redis_test_stream(redis_pool) -> str:
@@ -67,16 +90,17 @@ def redis_test_stream(redis_pool) -> str:
     redis_client.delete(stream_name)
 
 
-def read_test_table(sql_engine: sql.engine.Engine) -> pd.DataFrame:
+def read_test_table(sql_engine: sql.engine.Engine, table_name="test_table") -> pd.DataFrame:
     """
     Reads the test table into a DataFrame and returns it
     :param sql_engine: The SQL engine to read the data from
+    :param table_name: An optional name of the table to read from
     :return: The entire test table content
     """
 
     with sql_engine.connect() as con:
-        ret = pd.read_sql(sql.text("""
-            SELECT dp_id, obs_time, value_int, value_float, value_text FROM test_table;
+        ret = pd.read_sql(sql.text(f"""
+            SELECT dp_id, obs_time, value_int, value_float, value_text FROM {table_name};
         """), con, index_col="dp_id")
     ret = ret.sort_index()
     ret.index.name = None  # Mare writing reference tables easier
@@ -306,3 +330,80 @@ def test_channel_step_instantiation(reduced_channel_config, redis_pool, sql_engi
         "value_float": [41.99, 42.01],
         "value_text": ["source a", "source b"]
     }, index=[-1, -1]))
+
+
+def test_channel_duplicate_value_error(reduced_channel_config, redis_pool, sql_engine, test_table_indexed,
+                                       redis_test_stream):
+    """Verifies whether an error is raised on inserting duplicate values without the appropriate flag"""
+
+    redis_client = redis.Redis(connection_pool=redis_pool)
+    redis_client.xadd("test.stream", {
+        "dp_id": 2,
+        "my float": 0.2,
+    })
+    redis_client.xadd("test.stream", {
+        "dp_id": 2, # Error: Duplicate ID
+        "my float": 0.1,
+    })
+    redis_client.xadd("test.stream", {
+        "dp_id": 3, # Must succeed again
+        "my float": 0.3,
+    })
+
+    reduced_channel_config["data sink"]["table"] = test_table_indexed
+    chn = channel.Channel(reduced_channel_config, "test channel")
+
+    chn.open(redis_pool, sql_engine)
+
+    chn.execute_channel_once()  # The first call must succeed
+    with pytest.raises(exc.MessageFormatError):
+        chn.execute_channel_once()  # The second call should catch the duplicate value
+    chn.execute_channel_once()  # The third call should be ok again.
+
+    chn.close()
+
+    table_content = read_test_table(sql_engine, test_table_indexed)
+
+    assert table_content is not None
+    pd.testing.assert_frame_equal(table_content, pd.DataFrame({
+        "obs_time": [None, None],
+        "value_int": [42, 42],
+        "value_float": [0.2, 0.3],
+        "value_text": ["Nothing to add", "Nothing to add"]
+    }, index=[2, 3]))
+
+
+def test_channel_duplicate_value_update(reduced_channel_config, redis_pool, sql_engine, test_table_indexed,
+                                        redis_test_stream):
+    """Tests whether duplicate values are correctly updated"""
+
+    redis_client = redis.Redis(connection_pool=redis_pool)
+    redis_client.xadd("test.stream", {
+        "dp_id": 2,
+        "my float": 0.2,
+    })
+    redis_client.xadd("test.stream", {
+        "dp_id": 2, # Duplicate message
+        "my float": 0.1,
+    })
+
+    reduced_channel_config["data sink"]["table"] = test_table_indexed
+    reduced_channel_config["data sink"]["update duplicate values"] = True
+    chn = channel.Channel(reduced_channel_config, "test channel")
+
+    chn.open(redis_pool, sql_engine)
+
+    chn.execute_channel_once()  # The first call regularly inserts the first sample
+    chn.execute_channel_once()  # The second call must update the values
+
+    chn.close()
+
+    table_content = read_test_table(sql_engine, test_table_indexed)
+
+    assert table_content is not None
+    pd.testing.assert_frame_equal(table_content, pd.DataFrame({
+        "obs_time": [None],
+        "value_int": [42],
+        "value_float": [0.1],
+        "value_text": ["Nothing to add"]
+    }, index=[2]))
