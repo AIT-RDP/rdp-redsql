@@ -148,8 +148,10 @@ class _SQLTableSink:
         :param messages: An iterable of messages. Each message must be composed of generic key-value pairs.
         """
 
+        self._logger.debug(f"Start to compute tabel representation for {self._destination_table.name}")
         output_data = list(map(self._remap_message, messages))
-        self._logger.debug(f"Begin to inserted {len(output_data)} row(s) into {self._destination_table.name}")
+
+        self._logger.debug(f"Begin to insert {len(output_data)} row(s) into {self._destination_table.name}")
         try:
             with self._sql_connection.begin():  # Open a new transaction to avoid caching issues
                 self._sql_connection.execute(sql.insert(self._destination_table), output_data)

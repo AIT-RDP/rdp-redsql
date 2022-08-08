@@ -62,7 +62,9 @@ class CachedSQLQuery(abstract_step.AbstractOneToOneStep):
         """Executes the query and fetches the results in a common message format"""
 
         assert self._sql_connection is not None
-        sql_results = self._sql_connection.execute(self._sql_statement, **message)
+        with self._sql_connection.begin():
+            # Wrap each single operation into a transaction to avoid deadlocks by holding DB resources
+            sql_results = self._sql_connection.execute(self._sql_statement, **message)
         result_data = sql_results.fetchall()
 
         if self._single_value and len(result_data) != 1:
