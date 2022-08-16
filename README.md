@@ -3,7 +3,10 @@ Generic Redis to SQL data synchronizer.
 
 To flexibly configure the operation of RedSQL independent of the Redis format, a
 series of transformation steps can be defined. Each step transforms the input messages into another series of output 
-messages that can be picked up by the next step or fed into the database. 
+messages that can be picked up by the next step or fed into the database.
+The overall data flow is illustrated in the following graphics. Note that some intermediate steps such as individual
+transformation steps may be omitted, in case messages are already received in an adequate format. 
+![Data Flow](docs/redsql-data-flow.png) 
 
 ## Installation (User Setup)
 Although RedSQL can also be installed via pip and accessed via the `redsql` commandline tool, it is recommended to use
@@ -99,7 +102,9 @@ channels:
     
     data sink:
       table: "forecasts"
-      columns:  # Defines the message keys for each column name. Per default, the same name will be assumed.
+      columns:  
+        # Defines the message keys for each column name. Per default, the same name will be assumed.
+        # Format: <column name>: <message key>
         obs_time: "observation_time"
         fc_time: "forecast_time"
 ```
@@ -225,7 +230,7 @@ For instance, the following input message
   {
     "fc_time": "2022-08-10T10:00:00Z",
     "obs_time": ["2022-08-10T11:00:00Z", "2022-08-10T12:00:00Z"],
-    "air_temperature_2m": [22.1, 23.2]
+    "value": [22.1, 23.2]
   }
 ]
 ```
@@ -235,12 +240,12 @@ is transformed into two output messages:
   {
     "fc_time": "2022-08-10T10:00:00Z",
     "obs_time": "2022-08-10T11:00:00Z",
-    "air_temperature_2m": 22.1
+    "value": 22.1
   },
   {
     "fc_time": "2022-08-10T10:00:00Z",
     "obs_time": "2022-08-10T12:00:00Z",
-    "air_temperature_2m": 23.2
+    "value": 23.2
   }
 ]
 ```
