@@ -1,0 +1,16 @@
+name: redsql
+channels:
+  - defaults
+dependencies:
+  - python=3.10
+  - pyyaml=6.0
+  - sqlalchemy=1.4
+  - pytest=7.1.2  # Not needed for productive use
+  - pandas=1.4.3  # Not needed for productive use
+  - pip=21.2
+  - pip:
+      - redis==4.3
+      - hiredis==2.0
+      - python-dotenv==0.20
+      - psycopg2-binary==2.9.3  # The conda non-binary installation triggers an import error
+      - versioneer==0.22  # Not needed for productive use

@@ -1,92 +1,285 @@
 # RedSQL Data Sync
+Generic Redis to SQL data synchronizer. 
 
-Generic Redis to SQL data synchronizer.
+To flexibly configure the operation of RedSQL independent of the Redis format, a
+series of transformation steps can be defined. Each step transforms the input messages into another series of output 
+messages that can be picked up by the next step or fed into the database.
+The overall data flow is illustrated in the following graphics. Note that some intermediate steps such as individual
+transformation steps may be omitted, in case messages are already received in an adequate format. 
+![Data Flow](docs/redsql-data-flow.png) 
 
-## Getting started
+## Installation (User Setup)
+Although RedSQL can also be installed via pip and accessed via the `redsql` commandline tool, it is recommended to use
+the provided container images via (Docker, Podman, ...). Pre-build images are hosted on the 
+[GILTab container registry](https://gitlab-intern.ait.ac.at/ees/rdp/generic-components/redsql/container_registry). Make
+sure that your Docker or Podman instance is properly authenticated. The main configuration file is expected at 
+`/etc/redsql/config.yml`.
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
-
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
-
-## Add your files
-
-- [ ] [Create](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#create-a-file) or [upload](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#upload-a-file) files
-- [ ] [Add files using the command line](https://docs.gitlab.com/ee/gitlab-basics/add-file.html#add-a-file-using-the-command-line) or push an existing Git repository with the following command:
-
+```shell
+podman login --username $GITLAB_USER --password $GITLAB_DEPLOYMENT_TOKEN gitlab-intern.ait.ac.at:5010
+podman run -v data/test/extensive-config.yml:/etc/redsql/config.yml \
+    gitlab-intern.ait.ac.at:5010/ees/rdp/generic-components/redsql
 ```
-cd existing_repo
-git remote add origin https://gitlab-intern.ait.ac.at/ees/rdp/generic-components/redsql.git
-git branch -M main
-git push -uf origin main
+
+The `gitlab-intern.ait.ac.at:5010/ees/rdp/generic-components/redsql` container defines the following tags:
+* `latest`: The latest release. Currently, the latest tag mirrors the state of the main branch.
+* `latest-dev`: The latest development snapshot as given in the development branch
+* `v<major>.<minor>.<patch>`: Versioned releases as defined by the corresponding git tags.
+
+
+## Installation (Development Setup)
+The development packages can be found in the conda environment definition: 
+```shell
+conda env create -f environment.yml
+conda activate redsql
 ```
 
-## Integrate with your tools
+For development and testing, RedSQL requires a Redis and PostgreSQL instance best provided via containers. To configure
+the containers, an environment file can be used:  
+```shell
+POSTGRES_DB=postgres
+POSTGRES_USER=postgres
+POSTGRES_HOST=localhost
+POSTGRES_PASSWORD=<some-pwd>
 
-- [ ] [Set up project integrations](https://gitlab-intern.ait.ac.at/ees/rdp/generic-components/redsql/-/settings/integrations)
+REDSQL_REDIS_HOST=localhost
+REDSQL_REDIS_PORT=6379
+REDSQL_REDIS_DB=0
+```
+The containers can then be started with:
+```shell
+podman run --env-file=.env -p 5432:5432 -v redsql-timescale-dev:/var/lib/postgresql/data -it -d \
+    docker.io/timescale/timescaledb:latest-pg14
+podman run -p 6379:6379 -it -d docker.io/redis
+```
 
-## Collaborate with your team
+To run the test suite, make sure that both the content root and the test directory are within the python path. The 
+connection to the Redis and PostgreSQL instance is given via environment variables and default assignments:
+```commandline
+set PYTHONPATH=.;.\test
+set REDSQL_DB_URL=postgresql://postgres:<some-pwd>@localhost:5432/postgres
 
-- [ ] [Invite team members and collaborators](https://docs.gitlab.com/ee/user/project/members/)
-- [ ] [Create a new merge request](https://docs.gitlab.com/ee/user/project/merge_requests/creating_merge_requests.html)
-- [ ] [Automatically close issues from merge requests](https://docs.gitlab.com/ee/user/project/issues/managing_issues.html#closing-issues-automatically)
-- [ ] [Enable merge request approvals](https://docs.gitlab.com/ee/user/project/merge_requests/approvals/)
-- [ ] [Automatically merge when pipeline succeeds](https://docs.gitlab.com/ee/user/project/merge_requests/merge_when_pipeline_succeeds.html)
+pytest test
+```
 
-## Test and Deploy
+## Configuration
+### Basic Input-Output Mapping
+The configuration is read from a YAML file passed on to the `redsql` executable. An exemplary configuration can be found
+in [the test data direcotry](data/test/extensive-config.yml). The `database connection` and `redis` statements globally
+define the connection parameters to the data sink and source, respectively. External environment variables can be
+referenced by `!env-template` expressions. E.g.:
 
-Use the built-in continuous integration in GitLab.
+```yaml
+# The connection URL to the SQL data sink:
+database connection: !env-template "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}/${POSTGRES_DB}"
+redis:
+  host: !env-template "${REDSQL_REDIS_HOST}"  # The Redis hostname or IP address. Default is localhost
+  port: !env-template "${REDSQL_REDIS_PORT}"  # The Redis port. Default is 6379
+  db: !env-template "${REDSQL_REDIS_DB}"  # The Redis database ID. Default is 0
+```
 
-- [ ] [Get started with GitLab CI/CD](https://docs.gitlab.com/ee/ci/quick_start/index.html)
-- [ ] [Analyze your code for known vulnerabilities with Static Application Security Testing(SAST)](https://docs.gitlab.com/ee/user/application_security/sast/)
-- [ ] [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/ee/topics/autodevops/requirements.html)
-- [ ] [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/ee/user/clusters/agent/)
-- [ ] [Set up protected environments](https://docs.gitlab.com/ee/ci/environments/protected_environments.html)
+By the `channels` configuration key, a named list of synchronisation relations that read from a specific stream, 
+transform the messages and write it into the database is given. A minimal channel definition can be configured by a 
+`trigger` section defining the redis stream to fetch the messages from and a `data sink` section that defines the 
+destination table:
+```yaml
+channels:  # The named list of synchronisation relations
+  forecasts_weather:  # An arbitrary name that is mostly used for debugging and logging purposes
+    trigger:  # Definitions on how to fetch data and trigger the channel execution
+      stream id: "forecasts.weather"  # The ID of the Redis stream to fetch messages from
+    data sink:
+      table: "forecasts"  # The name of the database table to write the message content to
+```
 
-***
+Without any further configuration, for each column, a message entry must be present. To map column names and message 
+keys that do not match, a `columns` clause can be appended to the `data sink` configuration. In case one column is not 
+listed in the `columns` section, a one-to-one mapping is assumed. 
+```yaml
+channels:
+  forecasts_weather:
+    trigger:
+      stream id: "forecasts.weather"
+    
+    data sink:
+      table: "forecasts"
+      columns:  
+        # Defines the message keys for each column name. Per default, the same name will be assumed.
+        # Format: <column name>: <message key>
+        obs_time: "observation_time"
+        fc_time: "forecast_time"
+```
 
-# Editing this README
+### Message Encoding
+Since Redis does not specify value encodings beyond strings, an `encoding` clause can be appended to the channel
+definitions. The clause itself defines a mapping of message keys to the expected encoding. In addition, a `_default` 
+key can be specified defining the encoding, if no further configuration is given for a particular key.
+```yaml
+channels:
+  forecasts_weather:
+    trigger:
+      stream id: "forecasts.weather"
+    
+    encoding:  # Defines the message encoding
+      _default: "JSON"  # The default encoding (JSON content)
+      fc_time: "JSONDatetimeString"  # Expect a single JSON string with ISO datetime   
+      obs_time: "JSONListWithDatetimeStrings"  # Expect a JSON list with ISO datetime strings
+    
+    data sink:
+      table: "forecasts"
+```
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thank you to [makeareadme.com](https://www.makeareadme.com/) for this template.
+Currently, the following encodings are supported:
+* `KeepEncoding`: Do not change the encoding given by Redis
+* `DatetimeString`: An ISO-formatted Datetime string without enclosing it in quotation marks as required by JSON
+* `JSON`: Directly decode the contents as JSON
+* `JSONListWithDatetimeStrings`: Assume an JSON array with ISO-formatted datetime strings is given.
+* `JSONDatetimeString`: Assume the JSON strings is an ISO-formatted datetime
 
-## Suggestions for a good README
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+### Transformation Steps
+Transformation rules can be defined to change the message format of the incoming messages to a format understood by the
+database. They are defined by a series of sequentially applied steps that transform the input message(s) to a series 
+of output messages. The individual steps are defined in the `steps` configuration clause that itself host a list of 
+individual step definitions: 
+```yaml
+channels:
+  forecasts_weather:
+    trigger:
+      stream id: "forecasts.weather"
+    
+    steps:  # The sequence of steps to apply to each input message
+      - type: "SplitByKey"  # The type of the individual step
+        destination key: "value"  # step-specific configuration
+    
+    data sink:
+      table: "forecasts"
+```
 
-## Name
-Choose a self-explaining name for your project.
+#### Split the Message by Message Keys
+The `SplitByKey` step generates a new message for each key in the input message. In addition, the original key is 
+renamed to the key name given in `destination key`. Optionally, the original key string can be stored in a new key 
+specified by `source output key`. Keys from the input message that should be copied to all output messages can be
+specified by the `always include` parameter:
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+```yaml
+channels:
+  forecasts_weather:
+    trigger:
+      stream id: "forecasts.weather"
+    
+    steps:  
+      - type: "SplitByKey"
+        always include: ["fc_time", "obs_time"]  # Copy fc_time and obs_time to each output message
+        destination key: "value"  # Store the value of each key to a key named "value"
+        source output key: "observation_type"  # Store the original key name to a new key named "observation_type"
+    
+    data sink:
+      table: "forecasts"
+```
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+The configuration above transforms the single input message
+```json
+[
+  {
+    "fc_time": "2022-08-10T10:00:00Z",
+    "obs_time": "2022-08-10T11:00:00Z",
+    "air_temperature_2m": 22.1,
+    "wind_speed_10m": 3.6
+  }
+]
+```
+into the following output messages:
+```json
+[
+  {
+    "fc_time": "2022-08-10T10:00:00Z",
+    "obs_time": "2022-08-10T11:00:00Z",
+    "value": 22.1,
+    "observation_type": "air_temperature_2m"
+  },
+  {
+    "fc_time": "2022-08-10T10:00:00Z",
+    "obs_time": "2022-08-10T11:00:00Z",
+    "value": 3.6,
+    "observation_type": "wind_speed_10m"
+  }
+]
+```
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+#### Split Arrays into Multiple Messages
+The `UnpackArrayValues` step can be applied to split equally sized arrays into multiple messages, one per index. The
+names of the message keys specifying the unpacked arrays will not be changed. The message keys of the arrays can be 
+specified by the `unpack keys` configuration:
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+```yaml
+channels:
+  forecasts_weather:
+    trigger:
+      stream id: "forecasts.weather"
+    
+    steps:  
+      - type: "UnpackArrayValues"  # Move each array element into a dedicated message
+        unpack keys: ["obs_time", "value"]  # The names of the arrays to unpack
+    
+    data sink:
+      table: "forecasts"
+```
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
+For instance, the following input message
+```json
+[
+  {
+    "fc_time": "2022-08-10T10:00:00Z",
+    "obs_time": ["2022-08-10T11:00:00Z", "2022-08-10T12:00:00Z"],
+    "value": [22.1, 23.2]
+  }
+]
+```
+is transformed into two output messages:
+```json
+[
+  {
+    "fc_time": "2022-08-10T10:00:00Z",
+    "obs_time": "2022-08-10T11:00:00Z",
+    "value": 22.1
+  },
+  {
+    "fc_time": "2022-08-10T10:00:00Z",
+    "obs_time": "2022-08-10T12:00:00Z",
+    "value": 23.2
+  }
+]
+```
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+#### Query External Data
+The step `CachedSQLQuery` can be used to extend each message by meta-information queried from the main database. The 
+`query` configuration specifies the SQL query to run for each message. Values from the message can be referenced by SQL
+parameters, e.g. `:key_name`. The key names that will be appended to each message are determined by the column names of
+the returned table. Per default, it is assumed that only a single row is returned that directly defines the message 
+keys. In case the `single value` configuration parameter is set to `False`, multiple rows can be returned as column 
+arrays.
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+To avoid excessive queries, a caching mechanism is implemented that stores previous results. The output of each query 
+needs to be determined by a list of `cache keys`. Each cache key specifies the name of a message key. In case a query 
+was already executed with the same cache key assignment, the result is immediately returned without executing the query 
+again. For instance, the following configuration extends the message by a `dp_id` parameter that is generated from the 
+values of a `station`, `data_provider`, and `observation_type` field in the input message:
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
-
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
-
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
-
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
-
-## License
-For open source projects, say how it is licensed.
-
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+```yaml
+channels:
+  forecasts_weather:
+    trigger:
+      stream id: "forecasts.weather"
+    
+    steps:  
+      - type: "CachedSQLQuery"  # Execute an SQL query and extend the message by its results
+        # The SQL query to execute:
+        query: "
+            SELECT id AS dp_id FROM data_points 
+              WHERE name=:observation_type AND data_provider=:data_provider AND location_code=:station
+          "
+        single value: True  # Expect a single value per column only, e.g.  {"dp_id": 42} 
+        cache keys: ["station", "data_provider", "observation_type"]  # The listed message keys determine the result
+    
+    data sink:
+      table: "forecasts"
+```

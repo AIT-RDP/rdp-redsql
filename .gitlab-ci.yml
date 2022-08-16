@@ -1,26 +1,124 @@
-# You can override the included template(s) by including variable overrides
-# SAST customization: https://docs.gitlab.com/ee/user/application_security/sast/#customizing-the-sast-settings
-# Secret Detection customization: https://docs.gitlab.com/ee/user/application_security/secret_detection/#customizing-settings
-# Dependency Scanning customization: https://docs.gitlab.com/ee/user/application_security/dependency_scanning/#customizing-the-dependency-scanning-settings
-# Container Scanning customization: https://docs.gitlab.com/ee/user/application_security/container_scanning/#customizing-the-container-scanning-settings
-# Note that environment variables can be set in several places
-# See https://docs.gitlab.com/ee/ci/variables/#cicd-variable-precedence
 stages:
-- build
-- test
-- deploy
-- review
-- dast
-- staging
-- canary
-- production
-- incremental rollout 10%
-- incremental rollout 25%
-- incremental rollout 50%
-- incremental rollout 100%
-- performance
-- cleanup
-sast:
-  stage: test
-include:
-- template: Auto-DevOps.gitlab-ci.yml
+  - build
+  - release
+  - cleanup
+
+variables:
+  CONTAINER_TEST_IMAGE: $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA
+  CONTAINER_MAIN_RELEASE_IMAGE: $CI_REGISTRY_IMAGE:latest
+  CONTAINER_DEVELOPMENT_RELEASE_IMAGE: $CI_REGISTRY_IMAGE:latest-dev
+
+# =============================================================================
+# Perform the unit test
+# =============================================================================
+
+test_python_3_10:
+  stage: build  # Docker-image creation and tests can run in parallel
+  services:
+    - name: docker.io/redis
+      alias: redis
+    - name: docker.io/postgres
+      alias: postgres
+  tags:
+    - docker
+    - x86_64
+  image: python:3.10
+  variables:
+    REDSQL_REDIS_HOST: "redis"
+    REDSQL_REDIS_PORT: "6379"
+    REDSQL_REDIS_DB: 0
+    POSTGRES_DB: "redsql_testing"
+    POSTGRES_USER: "postgres"
+    POSTGRES_PASSWORD: "$POSTGRES_PASSWORD"
+    REDSQL_DB_URL: "postgresql://postgres:$POSTGRES_PASSWORD@postgres:5432/redsql_testing"
+
+  script:
+    - pip install -r requirements.txt
+    - pip install pytest==7.1 pandas==1.4.3 # Dedicated testing requirements
+    - PYTHONPATH="${PYTHONPATH}:.:test" pytest --junitxml=report.xml --log-cli-level=DEBUG test
+  artifacts:  # Collect test results
+    when: always
+    paths:
+      - report.xml
+    reports:
+      junit: report.xml
+
+# =============================================================================
+# Create, test and push the docker images
+#
+# WARNING: These jobs execute on a shell runner. Take care not to crash the
+#          system.
+# =============================================================================
+
+# Creates the docker image for productive use
+build-images:
+  stage: build
+  tags:
+    - baremetal
+    - shell
+  script:
+    - docker info
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+    - docker build --pull --file docker/Dockerfile -t $CONTAINER_TEST_IMAGE .
+    - docker push $CONTAINER_TEST_IMAGE
+
+# Template that pushes a release image to $CONTAINER_RELEASE_IMAGE
+.release-image:
+  stage: release
+  tags:
+    - baremetal
+    - shell
+  script:
+    - docker info
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+    - docker pull $CONTAINER_TEST_IMAGE
+    - docker tag $CONTAINER_TEST_IMAGE $CONTAINER_RELEASE_IMAGE
+    - docker push $CONTAINER_RELEASE_IMAGE
+
+# Release the latest-tag
+release-image-main:
+  extends: .release-image
+  variables:
+    CONTAINER_RELEASE_IMAGE: $CONTAINER_MAIN_RELEASE_IMAGE
+  tags:
+    - baremetal
+    - shell
+  only:
+    - main
+    - master
+
+# release the latest-dev tag
+release-image-tag:
+  extends: .release-image
+  variables:
+    CONTAINER_RELEASE_IMAGE: $CI_REGISTRY_IMAGE:$CI_COMMIT_TAG
+  tags:
+    - baremetal
+    - shell
+  rules:
+    - if: $CI_COMMIT_TAG
+
+    # release the latest-dev tag
+release-image-dev:
+  extends: .release-image
+  variables:
+    CONTAINER_RELEASE_IMAGE: $CONTAINER_DEVELOPMENT_RELEASE_IMAGE
+  tags:
+    - baremetal
+    - shell
+  only:
+    - development
+
+# Removes any local docker image to avoid littering the build host
+cleanup-images:
+  stage: cleanup
+  tags:
+    - baremetal
+    - shell
+  script:
+    - docker info
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+    - docker images --filter=reference="${CI_REGISTRY_IMAGE}"
+    - docker rmi -f $(docker images --filter=reference="${CI_REGISTRY_IMAGE}" -q)
+    - docker images
+  when: always
