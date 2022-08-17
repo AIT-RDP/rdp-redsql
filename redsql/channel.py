@@ -39,6 +39,8 @@ class _RedisStreamSource:
         self._consumer_name = config.get("consumer id", f"consumer.{self._stream_name}.{channel_name}")
 
         self._last_message_id = None
+        self._trim_cnt = 0  # Counts the number of messages since the last trim operation
+        self._trim_max = config.get("trim length", None)
 
         self._init_redis_streams()
 
@@ -86,6 +88,12 @@ class _RedisStreamSource:
         assert self._last_message_id is not None, "No message is left to acknowledge"
         self._redis_client.xack(self._stream_name, self._group_name, self._last_message_id)
         self._last_message_id = None
+
+        self._trim_cnt += 1 if self._trim_max is not None else 0
+        if self._trim_max is not None and self._trim_cnt >= (self._trim_max / 5.0):  # Permit 20% overshoot
+            trim_cnt = self._redis_client.xtrim(self._stream_name, self._trim_max, approximate=True)
+            self._trim_cnt = 0
+            self._logger.debug(f"Trimmed the Redis stream to {self._trim_max} elements removing {trim_cnt} entries.")
 
 
 class _SQLTableSink:

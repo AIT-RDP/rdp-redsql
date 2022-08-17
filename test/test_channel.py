@@ -54,6 +54,7 @@ def test_table(sql_engine: sql.engine.Engine) -> str:
             DROP TABLE test_table;
         """))
 
+
 @pytest.fixture()
 def test_table_indexed(sql_engine: sql.engine.Engine) -> str:
     """temporary creates an indexed testing table and returns its name"""
@@ -342,11 +343,11 @@ def test_channel_duplicate_value_error(reduced_channel_config, redis_pool, sql_e
         "my float": 0.2,
     })
     redis_client.xadd("test.stream", {
-        "dp_id": 2, # Error: Duplicate ID
+        "dp_id": 2,  # Error: Duplicate ID
         "my float": 0.1,
     })
     redis_client.xadd("test.stream", {
-        "dp_id": 3, # Must succeed again
+        "dp_id": 3,  # Must succeed again
         "my float": 0.3,
     })
 
@@ -383,7 +384,7 @@ def test_channel_duplicate_value_update(reduced_channel_config, redis_pool, sql_
         "my float": 0.2,
     })
     redis_client.xadd("test.stream", {
-        "dp_id": 2, # Duplicate message
+        "dp_id": 2,  # Duplicate message
         "my float": 0.1,
     })
 
@@ -407,3 +408,27 @@ def test_channel_duplicate_value_update(reduced_channel_config, redis_pool, sql_
         "value_float": [0.1],
         "value_text": ["Nothing to add"]
     }, index=[2]))
+
+
+def test_channel_trimming(reduced_channel_config, redis_pool, sql_engine, test_table, redis_test_stream):
+    """Tests the trim functionality that removes unused Redis messages"""
+
+    redis_client = redis.Redis(connection_pool=redis_pool)
+
+    reduced_channel_config["trigger"]["trim length"] = 50
+    chn = channel.Channel(reduced_channel_config, "test channel")
+    chn.open(redis_pool, sql_engine)
+
+    for i in range(250):
+        redis_client.xadd("test.stream", {
+            "dp_id": i,
+            "my float": 0.2,
+        })
+        chn.execute_channel_once()
+
+    chn.close()
+
+    assert 50 <= redis_client.xlen("test.stream") <= 150
+
+    table_content = read_test_table(sql_engine, test_table)
+    assert all(table_content.index == range(250))
