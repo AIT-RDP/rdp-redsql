@@ -135,6 +135,24 @@ Currently, the following encodings are supported:
 * `JSONListWithDatetimeStrings`: Assume an JSON array with ISO-formatted datetime strings is given.
 * `JSONDatetimeString`: Assume the JSON strings is an ISO-formatted datetime
 
+### Trim Redis Streams
+To avoid excessive memory usage of Redis streams, RedSQL may issue periodic trim operations. Within the `trigger` 
+configuration, a `trim length` parameters can be set to enable trimming and cut the stream to the given value. In case 
+trimming should be avoided, the parameter can be set to `None` (default). Note that for performance reasons, it is 
+currently not checked before trimming whether all messages have been consumed. Hence, setting the maximum length too 
+small may result in data loss. Additionally, approximate trimming is enabled, that permits size overshoot to further 
+improve the performance. The following example limits the number of messages within the redis stream to about 200:
+
+```yaml
+channels:
+  forecasts_weather:
+    trigger:
+      stream id: "forecasts.weather"
+      trim length: 200  # Redis stream trimming target
+    data sink:
+      table: "forecasts"
+```
+
 ### Transformation Steps
 Transformation rules can be defined to change the message format of the incoming messages to a format understood by the
 database. They are defined by a series of sequentially applied steps that transform the input message(s) to a series 
