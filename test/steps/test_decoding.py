@@ -53,7 +53,9 @@ def test_decoding(decoding_step, message, reference):
     {"dt_value": "noon"},
     {"dt_json_str_value": "\"eight o'clock\""},
     {"dt_json_list_value": "{}"},
-    {"dt_json_list_value": "[\"2022-02-02T00:00:00+01\", \"Ooops, I did it again\"]"}
+    {"dt_json_list_value": "[\"2022-02-02T00:00:00+01\", \"Ooops, I did it again\"]"},
+    {"dt_json_list_value": "[\"2022-02-02T00:00:00+01\", null]"},
+    {"dt_json_str_value": "null"},
 ])
 def test_invalid_encoding(decoding_step, message):
     """tests whether an appropriate exception is thrown"""
