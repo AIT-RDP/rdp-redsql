@@ -45,17 +45,18 @@ def main(argv=None, prog=None):
     redis_pool = _load_redis_connection_pool(config)
     sql_engine = _load_db_engine(config)
 
-    channel_executors = _startup_executors(config, redis_pool, sql_engine)
+    supervisor = executor.ChannelSupervisor(config["channels"], redis_pool, sql_engine)
+    supervisor.start()
 
-    logger.info(f"Startup of {len(channel_executors)} channel(s) complete, press Ctrl+C to exit the data crawler.")
-    _wait_for_termination_request()
+    logger.info(f"Startup of channels {supervisor.channel_names} complete, press Ctrl+C to exit the data crawler.")
+    _heartbeat_until_termination_request(supervisor)
 
     logger.info(f"Begin to shutdown the data crawler.")
-    _stop_executors(channel_executors)
+    supervisor.stop()
     logger.info("Bye!")
 
 
-def _wait_for_termination_request():
+def _heartbeat_until_termination_request(supervisor: executor.ChannelSupervisor):
     """suspends the main thread until a termination request was received"""
 
     def _handler(signal_number, _frame):
@@ -75,6 +76,7 @@ def _wait_for_termination_request():
     try:
         while True:
             time.sleep(10)
+            supervisor.heartbeat()
     except KeyboardInterrupt:
         pass
 
