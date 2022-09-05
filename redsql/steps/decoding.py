@@ -73,6 +73,8 @@ class DecodingStep(abstract_step.AbstractOneToOneStep):
         """Decodes the unescaped string value into a datetime object"""
         try:
             return dateutil.parser.isoparse(value)
+        except TypeError as e:
+            raise exc.MessageFormatError(f"Invalid input type for ISO Timestamp: {value}") from e
         except dateutil.parser.ParserError as e:
             raise exc.MessageFormatError(f"Invalid ISO Timestamp: {value}") from e
         except ValueError as e:
