@@ -1,7 +1,7 @@
 """
 Implements the steps that involve secondary database interactions (e.g. to resolve some values
 """
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Iterable
 
 import sqlalchemy as sql
 
@@ -34,13 +34,13 @@ class CachedSQLQuery(abstract_step.AbstractOneToOneStep):
         self._sql_statement = sql.text(config["query"])
         self._single_value = bool(config.get("single value", True))
         self._cache = {}
-        self._sql_connection: Optional[sql.engine.Connection] = None
+        self._sql_engine: Optional[sql.engine.Engine] = None
 
     def open(self, sql_engine: sql.engine.Engine, **kwargs):
         """Opens the database connection using the given engine"""
 
-        assert self._sql_connection is None, "open(...) was called before"
-        self._sql_connection = sql_engine.connect()
+        assert self._sql_engine is None, "open(...) was called before"
+        self._sql_engine = sql_engine
 
     def transform_single_message(self, message: Dict[str, Any]) -> Dict[str, Any]:
         """Executes the query, if necessary, and returns the result"""
@@ -61,10 +61,11 @@ class CachedSQLQuery(abstract_step.AbstractOneToOneStep):
     def _fetch_query_results(self, message: Dict[str, Any]) -> Dict[str, Any]:
         """Executes the query and fetches the results in a common message format"""
 
-        assert self._sql_connection is not None
-        with self._sql_connection.begin():
-            # Wrap each single operation into a transaction to avoid deadlocks by holding DB resources
-            sql_results = self._sql_connection.execute(self._sql_statement, **message)
+        assert self._sql_engine is not None
+        with self._sql_engine.connect() as sql_connection:
+            with sql_connection.begin():
+                # Wrap each single operation into a transaction to avoid deadlocks by holding DB resources
+                sql_results = sql_connection.execute(self._sql_statement, **message)
         result_data = sql_results.fetchall()
 
         if self._single_value and len(result_data) != 1:
@@ -81,6 +82,5 @@ class CachedSQLQuery(abstract_step.AbstractOneToOneStep):
 
     def close(self):
         """Frees allocated network resources"""
-        assert self._sql_connection is not None, "open(...) was not successfully called before"
-        self._sql_connection.close()
-        self._sql_connection = None
+        assert self._sql_engine is not None, "open(...) was not successfully called before"
+        self._sql_engine = None
