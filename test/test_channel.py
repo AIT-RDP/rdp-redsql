@@ -432,3 +432,38 @@ def test_channel_trimming(reduced_channel_config, redis_pool, sql_engine, test_t
 
     table_content = read_test_table(sql_engine, test_table)
     assert all(table_content.index == range(250))
+
+
+def test_channel_parallel_open(reduced_channel_config, redis_pool, sql_engine, test_table, redis_test_stream):
+    """tests whether multiple channels can be opened in parallel (#27)"""
+    redis_client = redis.Redis(connection_pool=redis_pool)
+    num_parallel_channels = 10
+
+    for i in range(num_parallel_channels):
+        redis_client.xadd("test.stream", {
+            "my int": 666 + i,
+            "my float": 0.2,
+            "dp_id": i
+        })
+
+    reduced_channel_config["trigger"]["group id"] = f"group.{redis_test_stream}.combined"
+    channels = [channel.Channel(reduced_channel_config, f"test-channel-{i}") for i in range(num_parallel_channels)]
+
+    for chn in channels:
+        chn.open(redis_pool, sql_engine)
+
+    for chn in channels:  # Let each channel process one message
+        chn.execute_channel_once()
+
+    for chn in channels:
+        chn.open(redis_pool, sql_engine)
+
+    table_content = read_test_table(sql_engine)
+
+    assert table_content is not None
+    pd.testing.assert_frame_equal(table_content, pd.DataFrame({
+        "obs_time": [None] * num_parallel_channels,
+        "value_int": [666 + i for i in range(num_parallel_channels)],
+        "value_float": [0.2] * num_parallel_channels,
+        "value_text": ["Nothing to add"] * num_parallel_channels
+    }, index=list(range(num_parallel_channels))))

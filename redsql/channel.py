@@ -115,9 +115,9 @@ class _SQLTableSink:
         self._logger = logging.getLogger(f"{__name__}.{channel_name}")
 
         self._logger.debug(f"Try to access meta data from the SQL engine {sql_engine}")
-        self._sql_connection = sql_engine.connect()
-        self._sql_meta = sql.MetaData()
-        self._sql_meta.reflect(bind=self._sql_connection)
+        self._sql_engine = sql_engine
+        self._sql_meta = sql.MetaData(bind=sql_engine)
+        self._sql_meta.reflect()
         self._logger.debug(f"SQL schema successfully retrieved.")
 
         self._destination_table = self._sql_meta.tables[config["table"]]
@@ -194,8 +194,9 @@ class _SQLTableSink:
 
         self._logger.debug(f"Begin to insert {len(output_data)} row(s) into {self._destination_table.name}")
         try:
-            with self._sql_connection.begin():  # Open a new transaction to avoid caching issues
-                self._sql_connection.execute(self._insert_statement, output_data)
+            with self._sql_engine.connect() as sql_connection:
+                with sql_connection.begin():  # Open a new transaction to avoid caching issues
+                    sql_connection.execute(self._insert_statement, output_data)
 
         except sqlalchemy.exc.DataError as e:
             new_err = exc.MessageFormatError(f"Unable to insert samples into {self._destination_table.name} using "
@@ -222,8 +223,7 @@ class _SQLTableSink:
 
     def close(self):
         """Closes the database connection and frees allocated resources"""
-        self._sql_connection.close()
-        self._sql_connection = None
+        self._sql_engine = None
 
 
 class Channel:
