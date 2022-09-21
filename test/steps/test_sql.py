@@ -100,3 +100,18 @@ def test_cached_sql_query_failure(sql_engine, reference_table):
     with pytest.raises(ValueError):
         list(step.transform_messages([{"dp_id": 42, "aux_value": "Supplement"}]))
     step.close()
+
+
+def test_cached_sql_query_multiple_open_queries(sql_engine, reference_table):
+    """Tests whether it is possible to open multiple queries simultaneously See (#27)"""
+
+    steps = [sql_step.CachedSQLQuery({
+        "cache keys": ["dp_id"],
+        "query": f"SELECT 'yeah' AS static_text, value_text FROM {reference_table} WHERE dp_id=:dp_id"
+    }, channel_name=f"<test-{i}>", step_name=f"<test>-{i}") for i in range(10)]
+
+    for step in steps:
+        step.open(sql_engine=sql_engine)
+
+    for step in steps:
+        step.close()

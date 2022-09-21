@@ -34,7 +34,7 @@ def sql_engine() -> sql.engine.Engine:
     """Returns a connected engine referencing the test DB instance"""
 
     engine_url = os.environ["REDSQL_DB_URL"]  # e.g. postgresql://postgres:test@localhost/testing_db
-    engine = sql.create_engine(engine_url)
+    engine = sql.create_engine(engine_url, pool_size=2, max_overflow=2, pool_timeout=2)
     engine.connect()
 
     return engine
