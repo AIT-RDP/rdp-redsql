@@ -1,6 +1,7 @@
 """
 Implements the actual execution logic managing the individual channels
 """
+import json
 import logging
 import threading
 from typing import Optional, Dict, Type, List
@@ -9,6 +10,7 @@ import redis
 import sqlalchemy.engine
 
 import redsql.channel as channel
+import redsql.exc as exc
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +57,11 @@ class ThreadChannelExecutor:
             while not self._exit_event.is_set():
                 self._channel.execute_channel_once()
                 self._flush_loggers()
+        except exc.MessageFormatError as err:
+            self._logger.error(f"Received a malformed message: {err.description}\n" + ("-" * 20) +
+                               "\nTriggering intermediate message:\n" + json.dumps(err.triggering_message, indent=2) +
+                               "\n" + ("-" * 20) + "Received message:\n" + json.dumps(err.external_message, indent=2))
+            raise err
         except Exception as err:
             self._logger.error(f"Caught a {type(err).__name__}: {err}")
             raise err
