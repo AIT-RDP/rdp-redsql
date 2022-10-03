@@ -12,7 +12,6 @@ import redsql.exc as exc
 @pytest.mark.parametrize("message,reference", [
     ({"time": datetime.datetime(2022, 10, 3, 0, 1, tzinfo=datetime.timezone.utc)},
      "{\n  \"time\": \"2022-10-03T00:01:00+00:00\"\n}"),
-    ({"time": pd.Timestamp("2022-10-03T00:01:00+00:00")}, "{\n  \"time\": \"2022-10-03T00:01:00+00:00\"\n}"),
     ({"a": 42}, "{\n  \"a\": 42\n}"),
 ])
 def test_message_format_error_external_message(message, reference):
@@ -26,7 +25,6 @@ def test_message_format_error_external_message(message, reference):
 @pytest.mark.parametrize("message,reference", [
     ({"time": datetime.datetime(2022, 10, 3, 0, 1, tzinfo=datetime.timezone.utc)},
      "{\n  \"time\": \"2022-10-03T00:01:00+00:00\"\n}"),
-    ({"time": pd.Timestamp("2022-10-03T00:01:00+00:00")}, "{\n  \"time\": \"2022-10-03T00:01:00+00:00\"\n}"),
     ({"a": 42}, "{\n  \"a\": 42\n}"),
 ])
 def test_message_format_error_triggering_message(message, reference):

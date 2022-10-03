@@ -5,8 +5,6 @@ import datetime
 import json
 from typing import Dict, Any, Optional
 
-import pandas as pd
-
 
 class MessageFormatError(ValueError):
     """
@@ -35,7 +33,7 @@ class MessageFormatError(ValueError):
         """Returns an extended string representation"""
 
         def default(self, o):
-            if isinstance(o, pd.Timestamp) or isinstance(o, datetime.datetime):
+            if isinstance(o, datetime.datetime):
                 return o.isoformat()
             else:
                 return json.JSONEncoder.default(self, o)
