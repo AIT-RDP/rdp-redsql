@@ -1,6 +1,8 @@
 """
 Implements the RedSQL exceptions
 """
+import datetime
+import json
 from typing import Dict, Any, Optional
 
 
@@ -26,3 +28,20 @@ class MessageFormatError(ValueError):
         self.description = description
         self.triggering_message = triggering_message
         self.external_message = external_message
+
+    class _ExtJSONEncoder(json.JSONEncoder):
+        """Returns an extended string representation"""
+
+        def default(self, o):
+            if isinstance(o, datetime.datetime):
+                return o.isoformat()
+            else:
+                return json.JSONEncoder.default(self, o)
+
+    def get_triggering_message_string(self) -> str:
+        """Returns a string representation of the triggering message"""
+        return json.dumps(self.triggering_message, cls=self._ExtJSONEncoder, indent=2)
+
+    def get_external_message_string(self) -> str:
+        """Returns a string representation of the externally received message"""
+        return json.dumps(self.external_message, cls=self._ExtJSONEncoder, indent=2)
