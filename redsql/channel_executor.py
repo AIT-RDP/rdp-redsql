@@ -59,8 +59,8 @@ class ThreadChannelExecutor:
                 self._flush_loggers()
         except exc.MessageFormatError as err:
             self._logger.error(f"Received a malformed message: {err.description}\n" + ("-" * 20) +
-                               "\nTriggering intermediate message:\n" + json.dumps(err.triggering_message, indent=2) +
-                               "\n" + ("-" * 20) + "Received message:\n" + json.dumps(err.external_message, indent=2))
+                               "\nTriggering intermediate message:\n" + err.get_triggering_message_string() +
+                               "\n" + ("-" * 20) + "Received message:\n" + err.get_external_message_string())
             raise err
         except Exception as err:
             self._logger.error(f"Caught a {type(err).__name__}: {err}")
