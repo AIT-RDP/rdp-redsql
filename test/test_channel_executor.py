@@ -79,17 +79,20 @@ def test_thread_executor_channel_calls(redis_pool, sql_engine):
     assert mockup_channel.close_invocations == 1
 
 
-def test_bulk_channel_operation(redis_pool, sql_engine, reference_table, test_table):
+def test_bulk_channel_operation(redis_pool, performance_sql_engine, reference_table, test_table):
     """Tests the end-to-end operation using several concurrent channels"""
+
+    num_channels = 30
+    num_messages = 5
 
     redis_client = redis.Redis(connection_pool=redis_pool)
 
     config = {}
-    for i in range(100):
+    for channel_nr in range(num_channels):
 
         # Assemble the individual channel configuration
-        config[f"Chn.{i}"] = {
-            "trigger": {"stream id": f"test-stream.{i}"},
+        config[f"Chn.{channel_nr}"] = {
+            "trigger": {"stream id": f"test-stream.{channel_nr}"},
             "encoding": {
                 "_default": "JSON",
                 "observation_time": "JSONDatetimeString"
@@ -113,22 +116,22 @@ def test_bulk_channel_operation(redis_pool, sql_engine, reference_table, test_ta
         }
 
         # Add some test messages
-        for j in range(100, 200):
-            redis_client.xadd(f"test-stream.{i}", fields={
-                "dp_id": f"{j}",
-                "value_float": f"{j * 100 + i}",
-                "value_int": f"{i}"
+        for message_nr in range(num_messages):
+            redis_client.xadd(f"test-stream.{channel_nr}", fields={
+                "dp_id": f"{100 + (message_nr % 100)}",
+                "value_float": f"{message_nr * num_channels + channel_nr}",
+                "value_int": f"{channel_nr}"
             })
 
-    supervisor = channel_executor.ChannelSupervisor(config, redis_pool, sql)
+    supervisor = channel_executor.ChannelSupervisor(config, redis_pool, performance_sql_engine)
     supervisor.start()
-
-    while test_channel.read_test_table(sql_engine, test_table).index.size != 100*100:
-        time.sleep(1)
-        status = supervisor.heartbeat()
-        assert status == {f"Chn.{i}": "ok" for i in range(100)}
-
-    supervisor.stop()
+    try:
+        while test_channel.read_test_table(performance_sql_engine, test_table).index.size != num_channels*num_messages:
+            time.sleep(1)
+            status = supervisor.heartbeat()
+            assert status == {f"Chn.{i}": "ok" for i in range(num_channels)}
+    finally:
+        supervisor.stop()
 
 
 class ErrMockupChannel(channel.Channel):

@@ -42,6 +42,8 @@ class ThreadChannelExecutor:
         self._redis_pool = redis_pool
         self._sql_engine = sql_engine
 
+        self._exc_info = None
+
     @property
     def channel(self) -> channel.Channel:
         """Returns the managed channel. (Mostly for testing purpose)"""
@@ -52,8 +54,9 @@ class ThreadChannelExecutor:
     def _run_channel(self):
         """Periodically executes the channel logic until a termination request is received"""
 
-        self._channel.open(self._redis_pool, self._sql_engine)
         try:
+            # Also report exceptions on opening the channel to avoid missing important information
+            self._channel.open(self._redis_pool, self._sql_engine)
             while not self._exit_event.is_set():
                 self._channel.execute_channel_once()
                 self._flush_loggers()
@@ -61,9 +64,11 @@ class ThreadChannelExecutor:
             self._logger.error(f"Received a malformed message: {err.description}\n" + ("-" * 20) +
                                "\nTriggering intermediate message:\n" + err.get_triggering_message_string() +
                                "\n" + ("-" * 20) + "Received message:\n" + err.get_external_message_string())
+            self._exc_info = err
             raise err
         except Exception as err:
             self._logger.error(f"Caught a {type(err).__name__}: {err}")
+            self._exc_info = err
             raise err
         finally:
             self._channel.close()
@@ -96,6 +101,12 @@ class ThreadChannelExecutor:
         """
         assert self._exit_event.is_set(), "The executor was not stopped before"
         self._thread.join()
+
+    @property
+    def exc_info(self) -> Optional[Exception]:
+        """Returns the exception info if the thread crashed"""
+        assert not self._thread.is_alive()
+        return self._exc_info
 
     def is_alive(self) -> bool:
         """Checks and returns the health status of the executor"""
@@ -169,7 +180,7 @@ class ChannelSupervisor:
 
         for ex_name, ex_channel in self._channel_executors.copy().items():
             if not ex_channel.is_alive():
-                logger.warning(f"Found channel {ex_name} to be dead. Restart the channel now.")
+                logger.warning(f"Found channel {ex_name} to be dead ({ex_channel.exc_info}). Restart the channel now.")
                 chn = ThreadChannelExecutor(self._channels_config[ex_name], self._redis_pool, self._sql_engine, ex_name,
                                             ext_channel=self._ext_channels.get(ex_name, None))
                 chn.start()

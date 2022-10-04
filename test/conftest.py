@@ -41,6 +41,17 @@ def sql_engine() -> sql.engine.Engine:
 
 
 @pytest.fixture()
+def performance_sql_engine() -> sql.engine.Engine:
+    """Returns a connected engine referencing the test DB instance using a high-performance configuration"""
+
+    engine_url = os.environ["REDSQL_DB_URL"]  # e.g. postgresql://postgres:test@localhost/testing_db
+    engine = sql.create_engine(engine_url)
+    engine.connect()
+
+    return engine
+
+
+@pytest.fixture()
 def reference_table(sql_engine: sql.engine.Engine) -> str:
     """temporary creates a testing table and returns its name"""
 
@@ -55,7 +66,7 @@ def reference_table(sql_engine: sql.engine.Engine) -> str:
             dict(dp_id=-1, value_text="This is the end"),
             dict(dp_id=42, value_text="One more question is left"),
             dict(dp_id=666, value_text="My name is legion"),
-            *[dict(dp_id=100+i, value_text=f"The {i}th beyond 100") for i in range(100)]
+            *[dict(dp_id=100 + i, value_text=f"The {i}th beyond 100") for i in range(100)]
         ])
 
     yield "reference_table"
