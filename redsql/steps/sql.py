@@ -66,7 +66,7 @@ class CachedSQLQuery(abstract_step.AbstractOneToOneStep):
             with sql_connection.begin():
                 # Wrap each single operation into a transaction to avoid deadlocks by holding DB resources
                 sql_results = sql_connection.execute(self._sql_statement, **message)
-        result_data = sql_results.fetchall()
+                result_data = sql_results.fetchall()  # Needs to be executed within the session (#29)
 
         if self._single_value and len(result_data) != 1:
             raise ValueError(f"The SQL query does not return a single result row but {len(result_data)}")

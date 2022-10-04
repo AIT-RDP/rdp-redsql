@@ -8,31 +8,6 @@ import sqlalchemy as sql
 import redsql.steps.sql as sql_step
 
 
-@pytest.fixture()
-def reference_table(sql_engine: sql.engine.Engine) -> str:
-    """temporary creates a testing table and returns its name"""
-
-    with sql_engine.begin() as con:
-        con.execute(sql.text("""
-            CREATE TABLE reference_table (
-                dp_id INTEGER NOT NULL,
-                value_text TEXT 
-            );
-        """))
-        con.execute(sql.text("INSERT INTO reference_table(dp_id, value_text) VALUES (:dp_id, :value_text)"), [
-            dict(dp_id=-1, value_text="This is the end"),
-            dict(dp_id=42, value_text="One more question is left"),
-            dict(dp_id=666, value_text="My name is legion"),
-        ])
-
-    yield "reference_table"
-
-    with sql_engine.begin() as con:
-        con.execute(sql.text("""
-            DROP TABLE reference_table;
-        """))
-
-
 def test_cached_sql_query_single_value(sql_engine, reference_table):
     """Tests the sql query facility using a single value"""
 

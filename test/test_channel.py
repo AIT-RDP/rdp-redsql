@@ -33,29 +33,6 @@ def reduced_channel_config() -> dict:
 
 
 @pytest.fixture()
-def test_table(sql_engine: sql.engine.Engine) -> str:
-    """temporary creates a testing table and returns its name"""
-
-    with sql_engine.begin() as con:
-        con.execute(sql.text("""
-            CREATE TABLE test_table (
-                dp_id INTEGER NOT NULL,
-                obs_time TIMESTAMPTZ DEFAULT NULL,
-                value_int INTEGER NOT NULL DEFAULT 42,
-                value_float DOUBLE PRECISION,
-                value_text TEXT DEFAULT 'Nothing to add' 
-            );
-        """))
-
-    yield "test_table"
-
-    with sql_engine.begin() as con:
-        con.execute(sql.text("""
-            DROP TABLE test_table;
-        """))
-
-
-@pytest.fixture()
 def test_table_indexed(sql_engine: sql.engine.Engine) -> str:
     """temporary creates an indexed testing table and returns its name"""
 
