@@ -105,6 +105,9 @@ class _SQLTableSink:
     more generic SQL queries.
     """
 
+    _prom_insert_cnt = prom.Counter("redsql_inserted_table_rows", labelnames=["channel_name"],
+                                    documentation="Number of inserted or updated table rows")
+
     def __init__(self, config: dict, sql_engine: sql.engine.Engine, channel_name: str):
         """
 
@@ -113,6 +116,7 @@ class _SQLTableSink:
         :param channel_name: The name of the corresponding channel for debugging purpose
         """
 
+        self._channel_name = channel_name
         self._logger = logging.getLogger(f"{__name__}.{channel_name}")
 
         self._logger.debug(f"Try to access meta data from the SQL engine {sql_engine}")
@@ -129,6 +133,8 @@ class _SQLTableSink:
             self._destination_table, self._logger,
             update_duplicates=config.get("update duplicate values", False)
         )
+
+        self._prom_insert_cnt.labels(channel_name=channel_name)
 
     @staticmethod
     def _get_column_mapping(column_config: dict, destination_table: sql.Table, channel_name: str) -> Dict[str, str]:
@@ -198,6 +204,8 @@ class _SQLTableSink:
             with self._sql_engine.connect() as sql_connection:
                 with sql_connection.begin():  # Open a new transaction to avoid caching issues
                     sql_connection.execute(self._insert_statement, output_data)
+
+            self._prom_insert_cnt.labels(channel_name=self._channel_name).inc(len(output_data))
 
         except sqlalchemy.exc.DataError as e:
             new_err = exc.MessageFormatError(f"Unable to insert samples into {self._destination_table.name} using "

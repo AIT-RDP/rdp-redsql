@@ -3,6 +3,7 @@ Implements the steps that involve secondary database interactions (e.g. to resol
 """
 from typing import Dict, Any, Optional, Iterable
 
+import prometheus_client as prom
 import sqlalchemy as sql
 
 import redsql.steps.abc.step as abstract_step
@@ -16,6 +17,9 @@ class CachedSQLQuery(abstract_step.AbstractOneToOneStep):
     To improve the performance, results are heavily cached. Hence, it is advised to only use the step for static
     meta-data.
     """
+
+    _prom_lookups = prom.Counter("redsql_sql_queries", labelnames=["channel_name", "step_name"],
+                                 documentation="The number of SQL queries that were not found in the local cache")
 
     def __init__(self, config: dict, channel_name: str, step_name: str, **kwargs):
         """
@@ -35,6 +39,10 @@ class CachedSQLQuery(abstract_step.AbstractOneToOneStep):
         self._single_value = bool(config.get("single value", True))
         self._cache = {}
         self._sql_engine: Optional[sql.engine.Engine] = None
+
+        self._step_name = step_name
+        self._channel_name = channel_name
+        self._prom_lookups.labels(channel_name=channel_name, step_name=step_name)
 
     def open(self, sql_engine: sql.engine.Engine, **kwargs):
         """Opens the database connection using the given engine"""
@@ -67,6 +75,8 @@ class CachedSQLQuery(abstract_step.AbstractOneToOneStep):
                 # Wrap each single operation into a transaction to avoid deadlocks by holding DB resources
                 sql_results = sql_connection.execute(self._sql_statement, **message)
                 result_data = sql_results.fetchall()  # Needs to be executed within the session (#29)
+
+        self._prom_lookups.labels(channel_name=self._channel_name, step_name=self._step_name).inc()
 
         if self._single_value and len(result_data) != 1:
             raise ValueError(f"The SQL query does not return a single result row but {len(result_data)}")
