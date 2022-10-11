@@ -7,6 +7,7 @@ import logging
 import threading
 from typing import Optional, Dict, Any, List, Iterable
 
+import prometheus_client as prom
 import redis
 import sqlalchemy as sql
 import sqlalchemy.exc
@@ -229,6 +230,9 @@ class _SQLTableSink:
 class Channel:
     """A data pipeline with a unified set of processing steps"""
 
+    _prom_message_cnt = prom.Counter("redsql_processed_messages", labelnames=["channel_name", "type"],
+                                     documentation="Message counts for each channel")
+
     def __init__(self, channel_config: dict, channel_name: str = "<channel>"):
         """
         Initializes the channel but does not start any processing steps
@@ -251,6 +255,9 @@ class Channel:
 
         step_config = channel_config.get("steps", [])
         self._transformation_steps += self._instantiate_steps(step_config, channel_name, self._logger)
+
+        for tp_name in ["in", "success", "err_general", "err_format"]:
+            self._prom_message_cnt.labels(channel_name=channel_name, type=tp_name)
 
     @staticmethod
     def _instantiate_steps(step_config: list, channel_name: str,
@@ -335,15 +342,23 @@ class Channel:
         if message is not None:
 
             output_messages = [message]
+            batch_size = len(output_messages)
+            self._prom_message_cnt.labels(channel_name=self._channel_name, type="in").inc(batch_size)
+
             try:
                 # Run the processing steps and push the result
                 for step in self._transformation_steps:
                     output_messages = step.transform_messages(output_messages)
                 self._data_sink.insert_messages(output_messages)
+                self._prom_message_cnt.labels(channel_name=self._channel_name, type="success").inc(batch_size)
 
             except exc.MessageFormatError as e:
                 self._data_source.ack_last_message()  # Permanent error. Remove the message from the queue
                 e.external_message = message
+                self._prom_message_cnt.labels(channel_name=self._channel_name, type="err_format").inc(batch_size)
+                raise
+            except Exception as e:
+                self._prom_message_cnt.labels(channel_name=self._channel_name, type="err_general").inc(batch_size)
                 raise
 
             self._data_source.ack_last_message()
