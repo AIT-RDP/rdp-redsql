@@ -99,10 +99,3 @@ def test_table(sql_engine: sql.engine.Engine) -> str:
         con.execute(sql.text("""
             DROP TABLE test_table;
         """))
-
-
-@pytest.fixture()
-def prom_registry() -> prom.registry.CollectorRegistry:
-    """Returns a temporary prometheus metric registry"""
-
-    return prom.CollectorRegistry()

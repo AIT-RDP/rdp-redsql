@@ -123,9 +123,13 @@ class ChannelSupervisor:
     an executor, if necessary.
     """
 
+    _prom_channel_alive = prom.Gauge("redsql_channel_alive", labelnames=["channel_name"],
+                                     documentation="Flag that indicates whether the channel is alive")
+    _prom_restarted = prom.Counter("redsql_channel_restarts", labelnames=["channel_name"],
+                                   documentation="Number of forced restarts due to crashed channels")
+
     def __init__(self, channels_config: Dict[str, dict], redis_pool: redis.ConnectionPool,
-                 sql_engine: sqlalchemy.engine.Engine, ext_channels: Optional[Dict[str, channel.Channel]] = None,
-                 prom_registry = prom.REGISTRY):
+                 sql_engine: sqlalchemy.engine.Engine, ext_channels: Optional[Dict[str, channel.Channel]] = None):
         """
         Instantiates the channels and connected executors
 
@@ -133,7 +137,6 @@ class ChannelSupervisor:
         :param redis_pool: The redis pool to pass on to each channel
         :param sql_engine: The sql engine to pass on to each channel
         :param ext_channels: Some externally supplied channels to test the function
-        :param prom_registry: An externally supplied metric registry to associate the own metrics with.
         """
 
         self._channels_config = channels_config
@@ -150,14 +153,9 @@ class ChannelSupervisor:
             for ex_name, cnf in channels_config.items()
         }
 
-        self._prom_channels_alive = prom.Gauge("redsql_channels_alive", registry=prom_registry,
-                                               documentation="The number of channels that are currently alive")
-        self._prom_channels_alive.set(0)
-        self._prom_restarted = prom.Counter("redsql_channel_restarts", labelnames=["channel_name"],
-                                            registry=prom_registry,
-                                            documentation="Number of forced restarts due to crashed channels")
         for name in channels_config.keys():
             self._prom_restarted.labels(channel_name=name)
+            self._prom_channel_alive.labels(channel_name=name).set(0)
 
     @property
     def channel_names(self) -> List[str]:
@@ -167,9 +165,9 @@ class ChannelSupervisor:
     def start(self):
         """Starts all channel executors"""
 
-        for ex in self._channel_executors.values():
+        for ex_name, ex in self._channel_executors.items():
             ex.start()
-        self._prom_channels_alive.set(len(self._channel_executors))
+            self._prom_channel_alive.labels(channel_name=ex_name).set(1)
 
     def stop(self):
         """Stops the operation of all channel executros and waits until all threads are stopped"""
@@ -177,10 +175,9 @@ class ChannelSupervisor:
         for ex in self._channel_executors.values():
             ex.stop()
 
-        for ex in self._channel_executors.values():
+        for ex_name, ex in self._channel_executors.items():
             ex.join()
-
-        self._prom_channels_alive.set(0)
+            self._prom_channel_alive.labels(channel_name=ex_name).set(0)
 
     def heartbeat(self) -> dict:
         """
@@ -192,21 +189,19 @@ class ChannelSupervisor:
         """
 
         status = {}
-        channels_alive = 0
-
         for ex_name, ex_channel in self._channel_executors.copy().items():
             if not ex_channel.is_alive():
                 logger.warning(f"Found channel {ex_name} to be dead ({ex_channel.exc_info}). Restart the channel now.")
-                self._prom_restarted.labels(channel_name=ex_name).inc()
-
                 chn = ThreadChannelExecutor(self._channels_config[ex_name], self._redis_pool, self._sql_engine, ex_name,
                                             ext_channel=self._ext_channels.get(ex_name, None))
                 chn.start()
+
                 self._channel_executors[ex_name] = chn
                 status[ex_name] = "restarted"
+                self._prom_channel_alive.labels(channel_name=ex_name).set(0)
+                self._prom_restarted.labels(channel_name=ex_name).inc()
             else:
                 status[ex_name] = "ok"
-                channels_alive += 1
+                self._prom_channel_alive.labels(channel_name=ex_name).set(1)
 
-        self._prom_channels_alive.set(channels_alive)
         return status
