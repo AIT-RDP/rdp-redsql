@@ -312,5 +312,6 @@ prometheus client:
 ```
 
 Note that setting the global configuration `prometheus client: None` will disable the metric export. An exemplary Grafana dashboard is available  in the [docs folder](docs/RedSQL_Details-1665497089427.json):
+
 ![Exemplary Grafana dashboard](docs/grafana-teaser.png)
 
