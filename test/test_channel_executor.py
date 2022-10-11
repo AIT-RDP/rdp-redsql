@@ -3,6 +3,7 @@ Quickly tests the channel executor
 """
 import time
 
+import prometheus_client as prom
 import pytest
 import redis
 import sqlalchemy as sql
@@ -79,7 +80,7 @@ def test_thread_executor_channel_calls(redis_pool, sql_engine):
     assert mockup_channel.close_invocations == 1
 
 
-def test_bulk_channel_operation(redis_pool, performance_sql_engine, reference_table, test_table):
+def test_bulk_channel_operation(redis_pool, performance_sql_engine, reference_table, test_table, prom_registry):
     """Tests the end-to-end operation using several concurrent channels"""
 
     num_channels = 30
@@ -123,7 +124,8 @@ def test_bulk_channel_operation(redis_pool, performance_sql_engine, reference_ta
                 "value_int": f"{channel_nr}"
             })
 
-    supervisor = channel_executor.ChannelSupervisor(config, redis_pool, performance_sql_engine)
+    supervisor = channel_executor.ChannelSupervisor(config, redis_pool, performance_sql_engine,
+                                                    prom_registry=prom_registry)
     supervisor.start()
     try:
         while test_channel.read_test_table(performance_sql_engine, test_table).index.size != num_channels*num_messages:
@@ -154,7 +156,7 @@ class ErrMockupChannel(channel.Channel):
         pass
 
 
-def test_channel_supervisor(redis_pool, sql_engine):
+def test_channel_supervisor(redis_pool, sql_engine, prom_registry):
     """Tests the restart-capabilities of the channel supervisor"""
 
     err_mockup = ErrMockupChannel()
@@ -162,7 +164,7 @@ def test_channel_supervisor(redis_pool, sql_engine):
         "error prone channel": {}
     }, redis_pool, sql_engine, ext_channels={
         "error prone channel": err_mockup
-    })
+    }, prom_registry=prom_registry)
 
     supervisor.start()
     time.sleep(0.1)
@@ -177,3 +179,4 @@ def test_channel_supervisor(redis_pool, sql_engine):
     assert status["error prone channel"] == "restarted"
 
     supervisor.stop()
+

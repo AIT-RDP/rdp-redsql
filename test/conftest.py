@@ -5,6 +5,7 @@ Provides common test fixtures for all test cases
 import os
 import logging
 
+import prometheus_client as prom
 import pytest
 import redis
 import sqlalchemy as sql
@@ -98,3 +99,10 @@ def test_table(sql_engine: sql.engine.Engine) -> str:
         con.execute(sql.text("""
             DROP TABLE test_table;
         """))
+
+
+@pytest.fixture()
+def prom_registry() -> prom.registry.CollectorRegistry:
+    """Returns a temporary prometheus metric registry"""
+
+    return prom.CollectorRegistry()

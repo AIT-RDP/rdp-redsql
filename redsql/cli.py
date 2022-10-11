@@ -11,6 +11,7 @@ import time
 from typing import Optional
 
 import dotenv
+import prometheus_client as prom
 import redis
 import sqlalchemy as sql
 import yaml
@@ -42,6 +43,8 @@ def main(argv=None, prog=None):
     logger.debug("Parse main YAML configuration file '%s'", args.config_file)
     config = load_config(args.config_file)
 
+    _startup_prometheus_client(config.get("prometheus client", {}))
+
     redis_pool = _load_redis_connection_pool(config)
     sql_engine = _load_db_engine(config)
 
@@ -54,6 +57,14 @@ def main(argv=None, prog=None):
     logger.info(f"Begin to shutdown the data crawler.")
     supervisor.stop()
     logger.info("Bye!")
+
+
+def _startup_prometheus_client(prometheus_config: Optional[dict] = None):
+    """Starts a local webserver that exposes the internal metrics, if requested"""
+    if prometheus_config is not None:
+        port = prometheus_config.get("port", 8000)
+        prom.start_http_server(port=port)
+        logger.info(f"Started the prometheus server at http://localhost:{port}")
 
 
 def _heartbeat_until_termination_request(supervisor: executor.ChannelSupervisor):
