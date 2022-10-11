@@ -301,3 +301,17 @@ channels:
     data sink:
       table: "forecasts"
 ```
+
+
+## Prometheus Metrics
+
+RedSQL can export a series of performance metrics. Per default, port 8000 and the endpoint "/" is configured. However, the following configuration can be used to adjust the behaviour.
+```yaml
+prometheus client:
+  port: 1414  # The port to grab prometheus metrics
+```
+
+Note that setting the global configuration `prometheus client: None` will disable the metric export. An exemplary Grafana dashboard is available  in the [docs folder](docs/RedSQL_Details-1665497089427.json):
+
+![Exemplary Grafana dashboard](docs/grafana-teaser.png)
+

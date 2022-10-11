@@ -5,6 +5,7 @@ Provides common test fixtures for all test cases
 import os
 import logging
 
+import prometheus_client as prom
 import pytest
 import redis
 import sqlalchemy as sql

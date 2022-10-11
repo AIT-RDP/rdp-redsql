@@ -3,6 +3,7 @@ Quickly tests the channel executor
 """
 import time
 
+import prometheus_client as prom
 import pytest
 import redis
 import sqlalchemy as sql
@@ -126,7 +127,8 @@ def test_bulk_channel_operation(redis_pool, performance_sql_engine, reference_ta
     supervisor = channel_executor.ChannelSupervisor(config, redis_pool, performance_sql_engine)
     supervisor.start()
     try:
-        while test_channel.read_test_table(performance_sql_engine, test_table).index.size != num_channels*num_messages:
+        while test_channel.read_test_table(performance_sql_engine,
+                                           test_table).index.size != num_channels * num_messages:
             time.sleep(1)
             status = supervisor.heartbeat()
             assert status == {f"Chn.{i}": "ok" for i in range(num_channels)}

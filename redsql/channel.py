@@ -7,6 +7,7 @@ import logging
 import threading
 from typing import Optional, Dict, Any, List, Iterable
 
+import prometheus_client as prom
 import redis
 import sqlalchemy as sql
 import sqlalchemy.exc
@@ -104,6 +105,9 @@ class _SQLTableSink:
     more generic SQL queries.
     """
 
+    _prom_insert_cnt = prom.Counter("redsql_inserted_table_rows", labelnames=["channel_name"],
+                                    documentation="Number of inserted or updated table rows")
+
     def __init__(self, config: dict, sql_engine: sql.engine.Engine, channel_name: str):
         """
 
@@ -112,6 +116,7 @@ class _SQLTableSink:
         :param channel_name: The name of the corresponding channel for debugging purpose
         """
 
+        self._channel_name = channel_name
         self._logger = logging.getLogger(f"{__name__}.{channel_name}")
 
         self._logger.debug(f"Try to access meta data from the SQL engine {sql_engine}")
@@ -128,6 +133,8 @@ class _SQLTableSink:
             self._destination_table, self._logger,
             update_duplicates=config.get("update duplicate values", False)
         )
+
+        self._prom_insert_cnt.labels(channel_name=channel_name)
 
     @staticmethod
     def _get_column_mapping(column_config: dict, destination_table: sql.Table, channel_name: str) -> Dict[str, str]:
@@ -198,6 +205,8 @@ class _SQLTableSink:
                 with sql_connection.begin():  # Open a new transaction to avoid caching issues
                     sql_connection.execute(self._insert_statement, output_data)
 
+            self._prom_insert_cnt.labels(channel_name=self._channel_name).inc(len(output_data))
+
         except sqlalchemy.exc.DataError as e:
             new_err = exc.MessageFormatError(f"Unable to insert samples into {self._destination_table.name} using "
                                              f"'{e.statement}' and params {e.params}: {e.detail}, {e.orig}.",
@@ -229,6 +238,9 @@ class _SQLTableSink:
 class Channel:
     """A data pipeline with a unified set of processing steps"""
 
+    _prom_message_cnt = prom.Counter("redsql_processed_messages", labelnames=["channel_name", "type"],
+                                     documentation="Message counts for each channel")
+
     def __init__(self, channel_config: dict, channel_name: str = "<channel>"):
         """
         Initializes the channel but does not start any processing steps
@@ -251,6 +263,9 @@ class Channel:
 
         step_config = channel_config.get("steps", [])
         self._transformation_steps += self._instantiate_steps(step_config, channel_name, self._logger)
+
+        for tp_name in ["in", "success", "err_general", "err_format"]:
+            self._prom_message_cnt.labels(channel_name=channel_name, type=tp_name)
 
     @staticmethod
     def _instantiate_steps(step_config: list, channel_name: str,
@@ -335,15 +350,23 @@ class Channel:
         if message is not None:
 
             output_messages = [message]
+            batch_size = len(output_messages)
+            self._prom_message_cnt.labels(channel_name=self._channel_name, type="in").inc(batch_size)
+
             try:
                 # Run the processing steps and push the result
                 for step in self._transformation_steps:
                     output_messages = step.transform_messages(output_messages)
                 self._data_sink.insert_messages(output_messages)
+                self._prom_message_cnt.labels(channel_name=self._channel_name, type="success").inc(batch_size)
 
             except exc.MessageFormatError as e:
                 self._data_source.ack_last_message()  # Permanent error. Remove the message from the queue
                 e.external_message = message
+                self._prom_message_cnt.labels(channel_name=self._channel_name, type="err_format").inc(batch_size)
+                raise
+            except Exception as e:
+                self._prom_message_cnt.labels(channel_name=self._channel_name, type="err_general").inc(batch_size)
                 raise
 
             self._data_source.ack_last_message()

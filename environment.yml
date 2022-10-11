@@ -13,4 +13,5 @@ dependencies:
       - hiredis==2.0
       - python-dotenv==0.20
       - psycopg2-binary==2.9.3  # The conda non-binary installation triggers an import error
+      - prometheus-client==0.14.1
       - versioneer==0.22  # Not needed for productive use
