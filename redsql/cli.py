@@ -4,6 +4,7 @@ Implements the main command line interface of RedSQL
 
 import argparse
 import logging
+import logging.config
 import os
 import signal
 import string
@@ -43,6 +44,7 @@ def main(argv=None, prog=None):
     logger.debug("Parse main YAML configuration file '%s'", args.config_file)
     config = load_config(args.config_file)
 
+    _setup_logging(config.get("logging", None))
     _startup_prometheus_client(config.get("prometheus client", {}))
 
     redis_pool = _load_redis_connection_pool(config)
@@ -57,6 +59,43 @@ def main(argv=None, prog=None):
     logger.info(f"Begin to shutdown the data crawler.")
     supervisor.stop()
     logger.info("Bye!")
+
+
+def _setup_logging(config: Optional[dict]):
+    """
+    Setups the logging module according to the given configuration.
+
+    In case no config is given, a default one is used. The documentation fo the logging scheme can be found at
+    https://docs.python.org/3.9/library/logging.config.html#configuration-dictionary-schema
+
+    :param config: The configuration snippet to apply
+    """
+
+    logging_config = {
+        "version": 1,
+        "handlers": {
+            "console": {
+                "class": "logging.StreamHandler",
+                "formatter": "default_fmt",
+                "level": "DEBUG",
+                "stream": "ext://sys.stdout"
+            }
+        },
+        "formatters": {
+            "default_fmt": {
+                "format": "%(asctime)s %(name)s %(levelname)s: %(message)s"
+            }
+        },
+        "root": {
+            "level": "DEBUG",
+            "handlers": ["console"]
+        }
+    }
+
+    if config is not None:
+        logging_config.update(config)
+
+    logging.config.dictConfig(logging_config)
 
 
 def _startup_prometheus_client(prometheus_config: Optional[dict] = None):
