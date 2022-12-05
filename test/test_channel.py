@@ -118,6 +118,35 @@ def test_channel_pass_through(reduced_channel_config, redis_pool, sql_engine, te
     }, index=[-1, 22]))
 
 
+def test_channel_pass_through_minimal_config(redis_pool, sql_engine, test_table, redis_test_stream):
+    """Tests the pass-through function in a minimal config"""
+
+    config = {
+        "trigger": {"stream id": redis_test_stream},
+        "data sink": {"table": test_table}
+    }
+    redis_client = redis.Redis(connection_pool=redis_pool)
+    redis_client.xadd(redis_test_stream, {
+        "dp_id": -1,
+        "value_float": 0.2,
+    })
+
+    chn = channel.Channel(config, "test channel")
+    chn.open(redis_pool, sql_engine)
+    chn.execute_channel_once()
+    chn.close()
+
+    table_content = read_test_table(sql_engine)
+
+    assert table_content is not None
+    pd.testing.assert_frame_equal(table_content, pd.DataFrame({
+        "obs_time": [None],
+        "value_int": [42],
+        "value_float": [0.2],
+        "value_text": ["Nothing to add"]
+    }, index=[-1]))
+
+
 def test_channel_invalid_sql_type(reduced_channel_config, redis_pool, sql_engine, test_table, redis_test_stream):
     """Tests the channel with an invalid SQL type"""
 
