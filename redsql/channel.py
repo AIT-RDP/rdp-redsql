@@ -126,7 +126,8 @@ class _SQLTableSink:
         self._logger.debug(f"SQL schema successfully retrieved.")
 
         self._destination_table = self._sql_meta.tables[config["table"]]
-        self._column_mapping = self._get_column_mapping(config["columns"], self._destination_table, channel_name)
+        self._column_mapping = self._get_column_mapping(config.get("columns", {}), self._destination_table,
+                                                        channel_name)
         self._logger.debug(f"Determine the column mapping of {self._destination_table.name}: {self._column_mapping}")
 
         self._insert_statement = self._compile_insert_statement(
