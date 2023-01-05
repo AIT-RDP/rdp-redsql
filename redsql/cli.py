@@ -175,7 +175,12 @@ def _load_redis_connection_pool(config: dict) -> redis.ConnectionPool:
     db = redis_config["db"]
     logger.debug(f"Configure redis connection to {host}:{port} using db {db}")
 
-    pool = redis.ConnectionPool(host=host, port=port, db=db, decode_responses=True)
+    if os.getenv('REDSQL_REDIS_PASSWORD') is not None:
+        pool = redis.ConnectionPool(host=host, port=port, db=db, password=os.getenv('REDSQL_REDIS_PASSWORD'),
+                                    decode_responses=True)
+    else:
+        pool = redis.ConnectionPool(host=host, port=port, db=db, decode_responses=True)
+
     client = redis.Redis(connection_pool=pool)
     client.ping()  # Will raise an exception in case a connection error occurs
     logger.debug(f"Redis connection to {host}:{port} using db {db} is alive.")
