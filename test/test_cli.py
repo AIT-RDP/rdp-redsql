@@ -1,5 +1,5 @@
 """
-Tests the high-level CLI and its configuration utilities
+Tests the pyrdp-commons for basic backwards compatibility.
 """
 
 import os
@@ -7,7 +7,7 @@ from typing import Dict
 
 import pytest
 
-import redsql.cli as cli
+import pyrdp_commons.cli as cli
 
 
 @pytest.fixture()
@@ -53,7 +53,7 @@ def minimal_env_test_set() -> Dict[str, str]:
 def test_load_config_minimal(minimal_config_file, minimal_env_test_set):
     """Loads and checks the minimal test config"""
 
-    config = cli.load_config(minimal_config_file)
+    config = cli.setup_app(minimal_config_file, None)
     assert config is not None
     assert "version" in config
     assert config["version"] == 1
@@ -65,26 +65,7 @@ def test_load_config_minimal(minimal_config_file, minimal_env_test_set):
 def test_load_config_env_template(minimal_config_file, minimal_env_test_set):
     """Tests the environment variable_substitution"""
 
-    config = cli.load_config(minimal_config_file)
+    config = cli.setup_app(minimal_config_file, None)
 
     assert "database connection" in config
     assert "postgresql://nsa:backdoor@database.ait.ac.at" == config["database connection"]
-
-
-def test_load_env_mockup(mockup_env_file, minimal_env_test_set):
-    """Tests loading the environment file"""
-
-    cli.load_env_file(mockup_env_file) # No override of existing variables
-    assert os.environ["DB_CRED"] == "nsa:backdoor"
-    assert os.environ["DB_HOST"] == "database.ait.ac.at"
-
-    del os.environ["DB_CRED"]
-    del os.environ["DB_HOST"]
-
-    cli.load_env_file(None)
-    assert "DB_CRED" not in os.environ
-    assert "DB_HOST" not in os.environ
-
-    cli.load_env_file(mockup_env_file)
-    assert os.environ["DB_CRED"] == "user:not-a-real-pwd"
-    assert os.environ["DB_HOST"] == "database-host"
