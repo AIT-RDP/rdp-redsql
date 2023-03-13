@@ -4,9 +4,9 @@
 pyyaml==6.0
 sqlalchemy==1.4
 redis==4.3
-python-dotenv==0.20
+python-dotenv==0.21.1
 psycopg2-binary==2.9.3
 python-dateutil==2.8.2
 prometheus-client==0.14.1
 pyrdp-commons==0.0.0.post24.dev0+5cbd951
-pandas==1.4.3
+pandas==1.5.3
