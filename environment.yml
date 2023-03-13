@@ -13,8 +13,7 @@ dependencies:
       - --extra-index-url https://gitlab-intern.ait.ac.at/api/v4/projects/3611/packages/pypi/simple
       - redis==4.3
       - hiredis==2.0
-      - python-dotenv==0.21.1
       - psycopg2-binary==2.9.3  # The conda non-binary installation triggers an import error
       - prometheus-client==0.14.1
       - versioneer==0.22  # Not needed for productive use
-      - pyrdp-commons==0.0.0.post24.dev0+5cbd951
+      - pyrdp-commons==0.0.0.post26.dev0+c87af5c
