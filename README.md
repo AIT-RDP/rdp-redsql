@@ -302,6 +302,34 @@ channels:
       table: "forecasts"
 ```
 
+In case some query parameters need to be passed on to the database as JSON objects, type conversion cannot be done 
+automatically. (Just imagine a string object which could either be encoded as ordinary string or JSON object.) To 
+circumvent this problem, RedSQL supports parameter tying for parameters that are not automatically parsed. The 
+`parameter types` configuration enables to specify the type for each parameter in the query. For parameters that are not
+listed, the default typing behaviour will apply.
+
+```yaml
+channels:
+  forecasts_weather:
+    trigger:
+      stream id: "forecasts.weather"
+    
+    steps:  
+      - type: "CachedSQLQuery"
+        # Note that :meta_data will be expected as JSONB 
+        query: "
+            SELECT get_or_create_data_point_id(
+                :observation_type, :device_name, :station, :data_provider, NULL, :meta_data
+              ) AS dp_id;
+          "
+        parameter types:
+          meta_data: JSONB  # Only the parameters that cannot be converted automatically need to be specified.
+        single value: True 
+        cache keys: ["observation_type", "device_name", "station", "data_provider"] 
+    
+    data sink:
+      table: "forecasts"
+```
 
 ## Prometheus Metrics
 
