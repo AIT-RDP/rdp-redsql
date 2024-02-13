@@ -35,7 +35,7 @@ class CachedSQLQuery(abstract_step.AbstractOneToOneStep):
             raise ValueError(f"A list of cache keys for {channel_name}.{step_name} is expected but an object of "
                              f" type {type(self._cache_keys)} is found.")
 
-        self._sql_statement = sql.text(config["query"])
+        self._sql_statement = self._compile_statement(config)
         self._single_value = bool(config.get("single value", True))
         self._cache = {}
         self._sql_engine: Optional[sql.engine.Engine] = None
@@ -43,6 +43,31 @@ class CachedSQLQuery(abstract_step.AbstractOneToOneStep):
         self._step_name = step_name
         self._channel_name = channel_name
         self._prom_lookups.labels(channel_name=channel_name, step_name=step_name)
+
+    @staticmethod
+    def _compile_statement(config: dict):
+        """Generates the sql statement from the configuration"""
+
+        known_types = {
+            "json": sql.JSON,
+            "jsonb": sql.dialects.postgresql.JSONB
+        }
+
+        statement = sql.text(config["query"])
+
+        parameter_types = config.get("parameter types", {})
+        unknown_types = list({t for t in parameter_types.values() if (str(t).lower()) not in known_types})
+        if len(unknown_types) > 0:
+            raise KeyError(
+                f"The following parameter types are unknown: {unknown_types}. Only {list(known_types.keys())} are "
+                "directly known. The other types will be automatically casted based on the the input message."
+                "If you need other types, please open a ticket."
+            )
+
+        statement = statement.bindparams(*[
+            sql.bindparam(k, type_=known_types[str(v).lower()]) for k, v in parameter_types.items()
+        ])
+        return statement
 
     def open(self, sql_engine: sql.engine.Engine, **kwargs):
         """Opens the database connection using the given engine"""
