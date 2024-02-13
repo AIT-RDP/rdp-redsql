@@ -93,5 +93,48 @@ def test_cached_sql_query_multiple_open_queries(sql_engine, reference_table):
 
 
 def test_cached_sql_query_json_parameter(sql_engine, json_table):
-    """Tests the JSON inster capabilities"""
-    pass
+    """Tests the JSON insert capabilities"""
+
+    step = sql_step.CachedSQLQuery({
+        "cache keys": ["meta_id"],
+        "parameter types": {"first_object": "JsOn", "second_object": "JSONB"},
+        "query": f"""
+            INSERT INTO {json_table}(meta_id, first_object, second_object) 
+            VALUES (:meta_id, :first_object, :second_object)
+            RETURNING meta_id AS meta
+        """
+    }, channel_name="<test>", step_name="<test>")
+
+    step.open(sql_engine=sql_engine)
+    messages = list(step.transform_messages([
+        {"meta_id": 42, "first_object": {"location": "Here", "nested": {"yes": "It's nested"}}, "second_object": {}},
+        {"meta_id": 43, "first_object": {}, "second_object": {"location": "Here", "nested": {"yes": "It's nested"}}},
+    ]))
+    step.close()
+
+    # Check the extended message
+    assert len(messages) == 2
+    assert messages[0]["meta"] == 42
+    assert messages[1]["meta"] == 43
+
+    # Check the database content
+    for row in sql_engine.execute(sql.text(f"SELECT first_object, second_object FROM {json_table} WHERE meta_id = 42")):
+        assert row[0] == {"location": "Here", "nested": {"yes": "It's nested"}}
+        assert row[1] == {}
+
+
+def test_cached_sql_query_unknown_parameter_type(sql_engine, json_table):
+    """Simply tests if the step raises a useful error message in case the parameter type information is invalid."""
+
+    with pytest.raises(KeyError) as ex_handler:
+        sql_step.CachedSQLQuery({
+            "cache keys": ["meta_id"],
+            "parameter types": {"first_object": "JSON", "second_object": "SomeEpicType"},
+            "query": f"""
+                INSERT INTO {json_table}(meta_id, first_object, second_object) 
+                VALUES (:meta_id, :first_object, :second_object)
+                RETURNING meta_id AS meta
+            """
+        }, channel_name="<test>", step_name="<test>")
+
+    assert "SomeEpicType" in str(ex_handler.value)
