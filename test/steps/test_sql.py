@@ -90,3 +90,8 @@ def test_cached_sql_query_multiple_open_queries(sql_engine, reference_table):
 
     for step in steps:
         step.close()
+
+
+def test_cached_sql_query_json_parameter(sql_engine, json_table):
+    """Tests the JSON inster capabilities"""
+    pass

@@ -79,6 +79,39 @@ def reference_table(sql_engine: sql.engine.Engine) -> str:
 
 
 @pytest.fixture()
+def json_table(sql_engine: sql.engine.Engine) -> str:
+    """Creates and pre-fills a simple tables that hosts some json objects"""
+
+    with sql_engine.begin() as con:
+        con.execute(sql.text("""
+            CREATE TABLE json_table (
+                meta_id INTEGER NOT NULL,
+                first_object JSON DEFAULT '{}'::JSON,
+                second_object JSONB DEFAULT '{}'::JSONB
+            );
+        """))
+        stmt = sql.text("INSERT INTO json_table(meta_id, first_object, second_object) VALUES (:id, :first, :second)")
+        stmt = stmt.bindparams(sql.bindparam('first', type_=sql.JSON), sql.bindparam('second', type_=sql.JSON))
+        con.execute(stmt,
+            [
+                dict(
+                    id=0,
+                    first={"location": "the first in line", "nested": {"yes": "we can"}},
+                    second={"query_support": True, "nested": {"really": True}}
+                ),
+                dict(id=1, first={"location": "the second in line", "nested": {"no": "not this time"}}, second={}),
+            ]
+        )
+
+    yield "json_table"
+
+    with sql_engine.begin() as con:
+        con.execute(sql.text("""
+            DROP TABLE json_table;
+        """))
+
+
+@pytest.fixture()
 def test_table(sql_engine: sql.engine.Engine) -> str:
     """temporary creates a testing table and returns its name"""
 
