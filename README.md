@@ -331,6 +331,37 @@ channels:
       table: "forecasts"
 ```
 
+### Join Message Values to a Complex Structure
+
+Some queries require complex (JSON) data structures. The processing step `PackMessageValues` allows to create such dict 
+and list-based structures from simpler fields by copying some message values into a destination structure. The 
+configuration parameter `destination` therefore lists the additional message keys and the structure of the values. The 
+structure itself can contain any YAML elements such as (nested) lists, dicts, numerical literals and string literals. 
+Other message values can be referenced via dedicated reference strings `"%<message-key>"`, where `<message-key>` 
+corresponds the key within the input message. Any such literal will be replaced by the corresponding values from the 
+input message. To enable string literals that start with a `%` character, the escape-sequence `%%` may be used. Note 
+that `%` characters after the very first position do not need to be escaped.
+
+The following configuration example appends one element, `meta_data` to the message.
+```yaml
+channels:
+  forecasts_weather:
+    trigger:
+      stream id: "forecasts.weather"
+    
+    steps:  
+      - type: "PackMessageValues"
+        destination:  # Define the target data structures
+          # The first level defines the message keys. Only string keys are allowed here. The element will be resolved 
+          # to the following dict structure:
+          meta_data:  
+            data_owner: "%owner"  # Copy the content of the "owner" element here
+            data_path: ["%data_source", "RedSQL"]  # The first element of the list will be replaced by "data_source"
+    
+    data sink:
+      table: "forecasts"
+```
+
 ## Prometheus Metrics
 
 RedSQL can export a series of performance metrics. Per default, port 8000 and the endpoint "/" is configured. However, the following configuration can be used to adjust the behaviour.
