@@ -1,4 +1,4 @@
-FROM python:3.10
+FROM ${DOCKER_PROXY_PREFIX}python:3.10
 
 WORKDIR /usr/src/app
 

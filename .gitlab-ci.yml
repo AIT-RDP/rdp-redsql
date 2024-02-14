@@ -13,14 +13,14 @@ variables:
 test_python_3_10:
   stage: build  # Docker-image creation and tests can run in parallel
   services:
-    - name: docker.io/redis
+    - name: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/redis
       alias: redis
-    - name: docker.io/postgres
+    - name: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/postgres
       alias: postgres
   tags:
     - docker
     - x86_64
-  image: python:3.10
+  image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/python:3.10
   variables:
     REDSQL_REDIS_HOST: "redis"
     REDSQL_REDIS_PORT: "6379"
@@ -55,8 +55,11 @@ build-images:
   tags:
     - baremetal
     - shell
+  variables:
+    DOCKER_PROXY_PREFIX: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/
   script:
     - docker info
+    - docker login -u $CI_DEPENDENCY_PROXY_USER -p $CI_DEPENDENCY_PROXY_PASSWORD $CI_DEPENDENCY_PROXY_SERVER
     - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
     - docker build --pull --file docker/Dockerfile -t $CONTAINER_TEST_IMAGE .
     - docker push $CONTAINER_TEST_IMAGE
