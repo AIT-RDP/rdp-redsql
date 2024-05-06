@@ -473,3 +473,25 @@ def test_channel_parallel_open(reduced_channel_config, redis_pool, sql_engine, t
         "value_float": [0.2] * num_parallel_channels,
         "value_text": ["Nothing to add"] * num_parallel_channels
     }, index=list(range(num_parallel_channels))))
+
+
+def test_channel_filtered_message(reduced_channel_config, redis_pool, sql_engine, test_table, redis_test_stream):
+    """Tests a message that will be completely filtered by the processing steps"""
+
+    # Setup a step that may produce empty messages
+    reduced_channel_config["steps"] = [
+        {"type": "UnpackArrayValues", "unpack keys": ["time", "value"]}
+    ]
+    reduced_channel_config["encoding"] = {"_default": "JSON"}  # Need to use JSON-encoded data for representing arrays.
+
+    redis_client = redis.Redis(connection_pool=redis_pool)
+    redis_client.xadd("test.stream", {
+        "time": "[]",
+        "value": "[]"
+    })
+
+    chn = channel.Channel(reduced_channel_config, "test channel")
+
+    chn.open(redis_pool, sql_engine)
+    chn.execute_channel_once()  # Should do nothing
+    chn.close()
