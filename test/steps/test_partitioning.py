@@ -81,3 +81,18 @@ def test_unpack_array_values():
         {"arr_a": "two", "arr_b": 23, "meta": "lab"}
     ]
     assert output_messages == reference_messages
+
+
+def test_unpack_array_values_single_empty():
+    """Tests the unpack function if an empty array is given"""
+
+    step = partitioning.UnpackArrayValues({"unpack keys": ["arr_a", "arr_b"]}, channel_name="<>", step_name="<>")
+    input_messages = [
+        {"arr_a": [], "arr_b": [], "meta": "void"},
+    ]
+
+    step.open()
+    output_messages = list(step.transform_messages(input_messages))
+    step.close()
+
+    assert len(output_messages) == 0
