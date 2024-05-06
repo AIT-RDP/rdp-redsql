@@ -200,6 +200,10 @@ class _SQLTableSink:
         self._logger.debug(f"Start to compute tabel representation for {self._destination_table.name}")
         output_data = list(map(self._remap_message, messages))
 
+        if len(output_data) <= 0:
+            self._logger.debug(f"No message data - skip inserting rows into {self._destination_table.name}")
+            return
+
         self._logger.debug(f"Begin to insert {len(output_data)} row(s) into {self._destination_table.name}")
         try:
             with self._sql_engine.connect() as sql_connection:
