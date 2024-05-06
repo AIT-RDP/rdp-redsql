@@ -1,5 +1,5 @@
 # Providing the token for the pyrdp-commons repo. Please avoid such constructs when switching to poetry.
---extra-index-url https://gitlab-intern.ait.ac.at/api/v4/projects/3611/packages/pypi/simple
+--extra-index-url https://__token__:${TOKEN_PYRDP_COMMONS}@gitlab-intern.ait.ac.at/api/v4/projects/3611/packages/pypi/simple
 
 pyyaml==6.0
 sqlalchemy==1.4
