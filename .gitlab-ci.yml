@@ -56,7 +56,7 @@ build-images:
     - baremetal
     - shell
   variables:
-    DOCKER_PROXY_PREFIX: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/
+    DOCKER_PROXY_PREFIX: ${CI_DEPENDENCY_PROXY_DIRECT_GROUP_IMAGE_PREFIX }/
   script:
     - docker info
     - docker login -u $CI_DEPENDENCY_PROXY_USER -p $CI_DEPENDENCY_PROXY_PASSWORD $CI_DEPENDENCY_PROXY_SERVER
