@@ -77,9 +77,9 @@ def read_test_table(sql_engine: sql.engine.Engine, table_name="test_table") -> p
     """
 
     with sql_engine.connect() as con:
-        ret = pd.read_sql(sql.text(f"""
+        ret = pd.read_sql(f"""
             SELECT dp_id, obs_time, value_int, value_float, value_text FROM {table_name};
-        """), con, index_col="dp_id")
+        """, con.connection, index_col="dp_id")
     ret = ret.sort_index()
     ret.index.name = None  # Mare writing reference tables easier
     return ret
