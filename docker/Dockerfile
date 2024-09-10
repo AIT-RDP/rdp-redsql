@@ -1,5 +1,8 @@
 FROM ${DOCKER_PROXY_PREFIX}python:3.10
 
+ARG TOKEN_PYRDP_COMMONS
+ENV TOKEN_PYRDP_COMMONS=$TOKEN_PYRDP_COMMONS
+
 WORKDIR /usr/src/app
 
 COPY requirements.txt setup.py setup.cfg setup.py versioneer.py ./
