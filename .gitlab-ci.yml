@@ -61,7 +61,7 @@ build-images:
     - docker info
     - docker login -u $CI_DEPENDENCY_PROXY_USER -p $CI_DEPENDENCY_PROXY_PASSWORD $CI_DEPENDENCY_PROXY_SERVER
     - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
-    - docker build --pull --file docker/Dockerfile -t $CONTAINER_TEST_IMAGE .
+    - docker build --pull --file docker/Dockerfile -t $CONTAINER_TEST_IMAGE --build-arg TOKEN_PYRDP_COMMONS=$TOKEN_PYRDP_COMMONS .
     - docker push $CONTAINER_TEST_IMAGE
 
 # Template that pushes a release image to $CONTAINER_RELEASE_IMAGE
