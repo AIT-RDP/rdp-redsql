@@ -1,11 +1,11 @@
 # Providing the token for the pyrdp-commons repo. Please avoid such constructs when switching to poetry.
 --extra-index-url https://__token__:${TOKEN_PYRDP_COMMONS}@gitlab-intern.ait.ac.at/api/v4/projects/3611/packages/pypi/simple
 
-pyyaml==6.0
+pyyaml==6.0.2
 sqlalchemy==1.4
-redis==4.3
-psycopg2-binary==2.9.3
+redis==5.0.8
+psycopg2-binary==2.9.9
 python-dateutil==2.8.2
 prometheus-client==0.14.1
-pyrdp-commons==0.0.0.post26.dev0+c87af5c
-pandas==1.5.3
+pyrdp-commons==0.0.0.post77.dev0+5b64a2b
+pandas==2.2.2

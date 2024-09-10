@@ -13,14 +13,14 @@ variables:
 test_python_3_10:
   stage: build  # Docker-image creation and tests can run in parallel
   services:
-    - name: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/redis
+    - name: ${CI_DEPENDENCY_PROXY_DIRECT_GROUP_IMAGE_PREFIX}/redis
       alias: redis
-    - name: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/postgres
+    - name: ${CI_DEPENDENCY_PROXY_DIRECT_GROUP_IMAGE_PREFIX}/postgres
       alias: postgres
   tags:
     - docker
     - x86_64
-  image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/python:3.10
+  image: ${CI_DEPENDENCY_PROXY_DIRECT_GROUP_IMAGE_PREFIX}/python:3.10
   variables:
     REDSQL_REDIS_HOST: "redis"
     REDSQL_REDIS_PORT: "6379"
@@ -32,7 +32,7 @@ test_python_3_10:
 
   script:
     - pip install -r requirements.txt
-    - pip install pytest==7.1 pandas==1.4.3 # Dedicated testing requirements
+    - pip install pytest==8.3.2 pandas==2.2.2 # Dedicated testing requirements
     - PYTHONPATH="${PYTHONPATH}:.:test" pytest --junitxml=report.xml --log-cli-level=DEBUG test
   artifacts:  # Collect test results
     when: always
@@ -56,7 +56,7 @@ build-images:
     - baremetal
     - shell
   variables:
-    DOCKER_PROXY_PREFIX: ${CI_DEPENDENCY_PROXY_DIRECT_GROUP_IMAGE_PREFIX }/
+    DOCKER_PROXY_PREFIX: ${CI_DEPENDENCY_PROXY_DIRECT_GROUP_IMAGE_PREFIX}/
   script:
     - docker info
     - docker login -u $CI_DEPENDENCY_PROXY_USER -p $CI_DEPENDENCY_PROXY_PASSWORD $CI_DEPENDENCY_PROXY_SERVER
