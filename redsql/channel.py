@@ -197,7 +197,7 @@ class _SQLTableSink:
         :param messages: An iterable of messages. Each message must be composed of generic key-value pairs.
         """
 
-        self._logger.debug(f"Start to compute tabel representation for {self._destination_table.name}")
+        self._logger.debug(f"Start to compute table representation for {self._destination_table.name}")
         output_data = list(map(self._remap_message, messages))
 
         if len(output_data) <= 0:
@@ -208,6 +208,16 @@ class _SQLTableSink:
         try:
             with self._sql_engine.connect() as sql_connection:
                 with sql_connection.begin():  # Open a new transaction to avoid caching issues
+                    for idx, item in enumerate(output_data):
+                        try:
+                            # handle null values
+                            if output_data[idx]['value']:
+                                output_data[idx]['value'] = float(output_data[idx]['value'])
+                        except ValueError as e:
+                            self._logger.error(f"Impossible to convert '{output_data[idx]['value']}' to float. "
+                                               f"The database supports only float values. "
+                                               f"Make sure to format the data in the Redis stream accordingly. "
+                                               f"The datapoint will not be inserted into the database")
                     sql_connection.execute(self._insert_statement, output_data)
 
             self._prom_insert_cnt.labels(channel_name=self._channel_name).inc(len(output_data))
