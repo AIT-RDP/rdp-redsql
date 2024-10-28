@@ -1,7 +1,6 @@
 stages:
   - build
   - release
-  - cleanup
 
 variables:
   CONTAINER_TEST_IMAGE: $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA
@@ -40,30 +39,91 @@ test_python_3_10:
     reports:
       junit: report.xml
 
-# =============================================================================
-# Create, test and push the docker images
-#
-# WARNING: These jobs execute on a shell runner. Take care not to crash the
-#          system. Clean your trash and do not leaf any artefacts such as
-#          docker images.
-# =============================================================================
 
-# Creates the docker image for productive use
-build-images:
+# Build image template
+.build-image-template:
   stage: build
   image:
     name: gcr.io/kaniko-project/executor:debug
     entrypoint: [ "" ]
   variables:
-    DOCKER_IMAGE: $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_NAME-$CI_COMMIT_SHORT_SHA
-    DOCKER_IMAGE_LATEST: $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_NAME
     DOCKERFILE_PATH: $CI_PROJECT_DIR/docker/Dockerfile
+    # Internal registry
+    INTERNAL_REGISTRY_DOCKER_IMAGE: $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_NAME-$CI_COMMIT_SHORT_SHA
+    INTERNAL_REGISTRY_DOCKER_IMAGE_LATEST: $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_NAME
+    # External registry
+    EXTERNAL_REGISTRY_DOCKER_IMAGE: $EXT_REGISTRY:$CI_COMMIT_REF_NAME-$CI_COMMIT_SHORT_SHA
+    EXTERNAL_REGISTRY_DOCKER_IMAGE_LATEST: $EXT_REGISTRY:$CI_COMMIT_REF_NAME
   tags:
     - ito
+      
+build-image:
+  extends: .build-image-template
+  stage: build
   script:
     - |
-      echo "{\"auths\":{\"$CI_REGISTRY\":{\"username\":\"$CI_REGISTRY_USER\",\"password\":\"$CI_REGISTRY_PASSWORD\"}}}" > /kaniko/.docker/config.json
-    - /kaniko/executor --context $CI_PROJECT_DIR --dockerfile $DOCKERFILE_PATH --destination $DOCKER_IMAGE --destination $DOCKER_IMAGE_LATEST --build-arg TOKEN_PYRDP_COMMONS=$TOKEN_PYRDP_COMMONS
+      cat <<EOF > /kaniko/.docker/config.json
+      {
+        "auths": {
+          "$CI_REGISTRY": {
+            "username": "$CI_REGISTRY_USER",
+            "password": "$CI_REGISTRY_PASSWORD"
+          },
+          "$EXT_REGISTRY": {
+            "username": "$EXT_REGISTRY_USER",
+            "password": "$EXT_REGISTRY_PASSWORD"
+          }
+        }
+      }
+      EOF
+    - >
+      /kaniko/executor
+      --context $CI_PROJECT_DIR
+      --dockerfile $DOCKERFILE_PATH
+      --build-arg TOKEN_PYRDP_COMMONS=$TOKEN_PYRDP_COMMONS
+      --destination $INTERNAL_REGISTRY_DOCKER_IMAGE
+      --destination $INTERNAL_REGISTRY_DOCKER_IMAGE_LATEST
+      --no-push
+      --no-push-cache
+  except:
+    - development
+    - main
+    - master
+      
+
+build-and-release-image:
+  extends: .build-image-template
+  stage: release
+  script:
+    - |
+      cat <<EOF > /kaniko/.docker/config.json
+      {
+        "auths": {
+          "$CI_REGISTRY": {
+            "username": "$CI_REGISTRY_USER",
+            "password": "$CI_REGISTRY_PASSWORD"
+          },
+          "$EXT_REGISTRY": {
+            "username": "$EXT_REGISTRY_USER",
+            "password": "$EXT_REGISTRY_PASSWORD"
+          }
+        }
+      }
+      EOF
+    - >
+      /kaniko/executor
+      --context $CI_PROJECT_DIR
+      --dockerfile $DOCKERFILE_PATH
+      --build-arg TOKEN_PYRDP_COMMONS=$TOKEN_PYRDP_COMMONS
+      --destination $INTERNAL_REGISTRY_DOCKER_IMAGE
+      --destination $INTERNAL_REGISTRY_DOCKER_IMAGE_LATEST
+      --destination $EXTERNAL_REGISTRY_DOCKER_IMAGE
+      --destination $EXTERNAL_REGISTRY_DOCKER_IMAGE_LATEST
+  only:
+    - development
+    - main
+    - master
+  
 
 ## Template that pushes a release image to $CONTAINER_RELEASE_IMAGE
 #.release-image:
