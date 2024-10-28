@@ -63,7 +63,7 @@ build-images:
   script:
     - |
       echo "{\"auths\":{\"$CI_REGISTRY\":{\"username\":\"$CI_REGISTRY_USER\",\"password\":\"$CI_REGISTRY_PASSWORD\"}}}" > /kaniko/.docker/config.json
-    - /kaniko/executor --context $CI_PROJECT_DIR --dockerfile $DOCKERFILE_PATH --destination $DOCKER_IMAGE --destination $DOCKER_IMAGE_LATEST
+    - /kaniko/executor --context $CI_PROJECT_DIR --dockerfile $DOCKERFILE_PATH --destination $DOCKER_IMAGE --destination $DOCKER_IMAGE_LATEST --build-arg TOKEN_PYRDP_COMMONS=$TOKEN_PYRDP_COMMONS
 
 ## Template that pushes a release image to $CONTAINER_RELEASE_IMAGE
 #.release-image:
