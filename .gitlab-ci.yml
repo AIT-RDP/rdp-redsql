@@ -3,7 +3,7 @@ stages:
   - release
 
 include:
-  - component: "$CI_SERVER_FQDN/ees/rdp/generic-components/rdp-cicd-components/kaniko@e2ecdc85a09929c44b5a4536be263a71c85a2c99"
+  - component: "$CI_SERVER_FQDN/ees/rdp/generic-components/rdp-cicd-components/kaniko@24c70b1d320e04e2c16a400625b55b99f0d4d3c9"
 
 # =============================================================================
 # Perform the unit test
