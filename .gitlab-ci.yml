@@ -93,7 +93,6 @@ build-image:
     - development
     - main
     - master
-    - 44-kaniko-not-pushing-to-ext-registry
       
 # Build and release an image to the internal and external gitlab registries
 build-and-release-image:
@@ -128,4 +127,3 @@ build-and-release-image:
     - development
     - main
     - master
-    - 44-kaniko-not-pushing-to-ext-registry
