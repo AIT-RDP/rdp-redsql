@@ -2,6 +2,9 @@ stages:
   - build
   - release
 
+include:
+  - component: $CI_SERVER_FQDN/ees/rdp/generic-components/rdp-cicd-components/kaniko@e2ecdc85a09929c44b5a4536be263a71c85a2c99
+
 
 # =============================================================================
 # Perform the unit test
@@ -36,94 +39,3 @@ test_python_3_10:
       - report.xml
     reports:
       junit: report.xml
-
-
-# =============================================================================
-# Build and release image
-# =============================================================================
-
-# Build image template
-.build-image-template:
-  stage: build
-  image:
-    name: gcr.io/kaniko-project/executor:debug
-    entrypoint: [ "" ]
-  variables:
-    DOCKERFILE_PATH: $CI_PROJECT_DIR/docker/Dockerfile
-    # Internal registry
-    INTERNAL_REGISTRY_DOCKER_IMAGE: $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_NAME-$CI_COMMIT_SHORT_SHA
-    INTERNAL_REGISTRY_DOCKER_IMAGE_LATEST: $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_NAME
-    # External registry
-    EXTERNAL_REGISTRY_DOCKER_IMAGE: $EXT_REGISTRY/$CI_PROJECT_NAME:$CI_COMMIT_REF_NAME-$CI_COMMIT_SHORT_SHA
-    EXTERNAL_REGISTRY_DOCKER_IMAGE_LATEST: $EXT_REGISTRY/$CI_PROJECT_NAME:$CI_COMMIT_REF_NAME
-  tags:
-    - ito
-
-
-# Build and release an image to the internal gitlab registry
-build-image:
-  extends: .build-image-template
-  stage: build
-  script:
-    - |
-      cat <<EOF > /kaniko/.docker/config.json
-      {
-        "auths": {
-          "$CI_REGISTRY": {
-            "username": "$CI_REGISTRY_USER",
-            "password": "$CI_REGISTRY_PASSWORD"
-          },
-          "$EXT_REGISTRY": {
-            "username": "$EXT_REGISTRY_USER",
-            "password": "$EXT_REGISTRY_PASSWORD"
-          }
-        }
-      }
-      EOF
-    - >
-      /kaniko/executor
-      --context $CI_PROJECT_DIR
-      --dockerfile $DOCKERFILE_PATH
-      --build-arg TOKEN_PYRDP_COMMONS=$TOKEN_PYRDP_COMMONS
-      --destination $INTERNAL_REGISTRY_DOCKER_IMAGE
-      --destination $INTERNAL_REGISTRY_DOCKER_IMAGE_LATEST
-#      --no-push
-#      --no-push-cache
-  except:
-    - development
-    - main
-    - master
-      
-# Build and release an image to the internal and external gitlab registries
-build-and-release-image:
-  extends: .build-image-template
-  stage: release
-  script:
-    - |
-      cat <<EOF > /kaniko/.docker/config.json
-      {
-        "auths": {
-          "$CI_REGISTRY": {
-            "username": "$CI_REGISTRY_USER",
-            "password": "$CI_REGISTRY_PASSWORD"
-          },
-          "$EXT_REGISTRY": {
-            "username": "$EXT_REGISTRY_USER",
-            "password": "$EXT_REGISTRY_PASSWORD"
-          }
-        }
-      }
-      EOF
-    - >
-      /kaniko/executor
-      --context $CI_PROJECT_DIR
-      --dockerfile $DOCKERFILE_PATH
-      --build-arg TOKEN_PYRDP_COMMONS=$TOKEN_PYRDP_COMMONS
-      --destination $INTERNAL_REGISTRY_DOCKER_IMAGE
-      --destination $INTERNAL_REGISTRY_DOCKER_IMAGE_LATEST
-      --destination $EXTERNAL_REGISTRY_DOCKER_IMAGE
-      --destination $EXTERNAL_REGISTRY_DOCKER_IMAGE_LATEST
-  only:
-    - development
-    - main
-    - master
