@@ -212,7 +212,7 @@ class _SQLTableSink:
                         try:
                             # handle null values
                             if 'value' in output_data[idx].keys():
-                                if output_data[idx].get('value'):
+                                if output_data[idx].get('value') is not None:
                                     output_data[idx]['value'] = float(output_data[idx]['value'])
                         except ValueError as e:
                             self._logger.error(f"Impossible to convert '{output_data[idx]['value']}' to float. "
