@@ -98,8 +98,8 @@ class CachedSQLQuery(abstract_step.AbstractOneToOneStep):
         with self._sql_engine.connect() as sql_connection:
             with sql_connection.begin():
                 # Wrap each single operation into a transaction to avoid deadlocks by holding DB resources
-                sql_results = sql_connection.execute(self._sql_statement, **message)
-                result_data = sql_results.fetchall()  # Needs to be executed within the session (#29)
+                sql_results = sql_connection.execute(self._sql_statement, parameters=message)
+                result_data = sql_results.mappings().fetchall()  # Needs to be executed within the session (#29)
 
         self._prom_lookups.labels(channel_name=self._channel_name, step_name=self._step_name).inc()
 
