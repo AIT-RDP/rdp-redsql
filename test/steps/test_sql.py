@@ -118,9 +118,10 @@ def test_cached_sql_query_json_parameter(sql_engine, json_table):
     assert messages[1]["meta"] == 43
 
     # Check the database content
-    for row in sql_engine.execute(sql.text(f"SELECT first_object, second_object FROM {json_table} WHERE meta_id = 42")):
-        assert row[0] == {"location": "Here", "nested": {"yes": "It's nested"}}
-        assert row[1] == {}
+    with sql_engine.connect() as con:
+        for row in con.execute(sql.text(f"SELECT first_object, second_object FROM {json_table} WHERE meta_id = 42")):
+            assert row[0] == {"location": "Here", "nested": {"yes": "It's nested"}}
+            assert row[1] == {}
 
 
 def test_cached_sql_query_unknown_parameter_type(sql_engine, json_table):
