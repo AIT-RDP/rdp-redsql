@@ -17,6 +17,7 @@ class TableConfig(pydantic.BaseModel):
 
     table: str = pydantic.Field(description="The name of the table within the database")
     columns: Dict[str, str] = pydantic.Field(description="The mapping of table columns to message keys", default={})
+
     update_duplicate_values: bool = pydantic.Field(
         description="Override duplicates in the table", default=False, alias="update duplicate values"
     )
@@ -40,8 +41,8 @@ class _PrecompiledTableSink:
         """
         self._logger = logger
         self._destination_table = sql_meta.tables[table_config.table]
-        self._column_mapping = self._get_column_mapping(table_config.columns, self._destination_table,
-                                                        channel_name)
+        self._column_mapping = self._get_column_mapping(table_config.columns, self._destination_table, channel_name)
+        self._type_mapping = self._get_type_mapping(self._destination_table)
         self._logger.debug(f"Determine the column mapping of {table_id} (DB table {self._destination_table.name}): "
                            f"{self._column_mapping}")
 
@@ -70,6 +71,25 @@ class _PrecompiledTableSink:
 
         mapping = {col_name: column_config.get(col_name, col_name) for col_name in column_names}
         return mapping
+
+    @staticmethod
+    def _get_type_mapping(destination_table: sql.Table) -> Dict[str, type]:
+        """Returns a mapping form the column name to the actual python type (for caching)"""
+
+        def default_cast(x):
+            return x
+        
+        supported_casts = {
+            tp.__name__: tp
+            for tp in [float, int, bool, str]
+        }
+
+        col_casts = {}
+        for col in destination_table.columns.keys():
+            col_casts[col] = supported_casts.get(destination_table.columns[col].type.python_type.__name__,
+                                                 default_cast)
+
+        return col_casts
 
     @staticmethod
     def _compile_insert_statement(destination_table: sql.Table, logger: logging.Logger,
@@ -108,18 +128,9 @@ class _PrecompiledTableSink:
         """
 
         output_data = self._remap_message(message)  # Apply the new column mapping
-        try:
-            try:
-                # handle null values
-                if 'value' in output_data.keys():
-                    if output_data.get('value') is not None:
-                        output_data['value'] = float(output_data['value'])
-            except ValueError as e:
-                self._logger.error(f"Impossible to convert '{output_data['value']}' to float. "
-                                   f"The database supports only float values. "
-                                   f"Make sure to format the data in the Redis stream accordingly. "
-                                   f"The datapoint will not be inserted into the database")
+        output_data = self._cast_message(output_data)  # Convert to the appropriate python types
 
+        try:
             sql_connection.execute(self._insert_statement, output_data)
 
         except sqlalchemy.exc.DataError as e:
@@ -142,6 +153,33 @@ class _PrecompiledTableSink:
             for col_name, message_name in self._column_mapping.items() if message_name in message
         }
         return sample_data
+
+    def _cast_message(self, message: Dict[str, Any]) -> Dict[str, Any]:
+        """Transforms the field type to the corresponding python type before inserting"""
+
+        ret = {}
+        for column_name, source_value in message.items():
+            try:
+                if source_value is None:
+                    ret[column_name] = None
+                else:
+                    ret[column_name] = self._type_mapping[column_name](source_value)
+            except ValueError as err:
+                new_err = exc.MessageFormatError(
+                    f"Unable to cast the value of column {column_name} from {self._destination_table.name} to "
+                    f"{self._type_mapping[column_name].__name__}. Got an invalid value '{source_value}'.",
+                    triggering_message=message
+                )
+                raise new_err from err
+            except TypeError as err:
+                new_err = exc.MessageFormatError(
+                    f"Unable to cast the value of column {column_name} from {self._destination_table.name} to "
+                    f"{self._type_mapping[column_name].__name__}. Got an invalid value '{source_value}'.",
+                    triggering_message=message
+                )
+                raise new_err from err
+
+        return ret
 
 
 class SQLTableSink:
