@@ -183,3 +183,12 @@ def test_resolve_type_type_key_error():
     with pytest.raises(exc.MessageFormatError):
         out_messages = step.transform_messages(in_messages)
         list(out_messages)
+
+
+def test_resolve_type_integrated_config():
+    """Tests the configuration in case integration keys are present"""
+
+    config = {
+        "type": "ResolveDataType",  # Needed for dynamic step instantiation
+    }
+    tr.ResolveDataType(config, "test-channel", "test-step")
