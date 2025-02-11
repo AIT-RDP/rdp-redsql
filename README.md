@@ -362,11 +362,75 @@ channels:
       table: "forecasts"
 ```
 
-## Dynamic Table Configurations
+## Type and Content Lookup
 
 There are some use-cases where data of a single stream should be inserted into different tables or different columns. 
 For instance, in case messages hold values of different data type, (e.g., float, boolean, objects), the destination 
 needs to be dynamically adjusted.
+For that use-case, a dynamic type resolution mechanism is available that looks up the destination type based on field 
+values and their data type. This information is stored in a message field and will be passed on to adjacent steps that 
+may choose the correct table or column based on the type information.
+
+For type lookups, a dedicated step called `ResolveDataType` is created. Per default, this step looks up the type of 
+the `value` message field, translates that to supported database types (double, bigint, boolean, jsonb) and stores the 
+result in a message field called `data_type`. However, for deep customization, the exact behaviour can be adjusted 
+using the following configuration variables:
+* `lookup_table`: The actual mapping of source information (type and field values) to the output field value. The 
+  mapping has to be given as a dictionary where the keys correspond to source values and the values will be pushed to 
+  the selected `output_key`. In case multiple sources are given, the keys must be tuples with exactly one element per 
+  source. A default element `"_default"` may be present that will be taken if no other entry matches.   
+* `source`: A list of source definitions. Right now one of the following is supported
+  *  `type_of`: The python type of the value of the corresponding message field. For builtin types, no package is 
+     taken. All other types will be prefixed by the package.
+  * `value_of`: Directly takes the value of the given message field and translates it via the lookup table.
+* `output_key`: The key to write the resolved type in (defaults to `data_type`).
+* `default`: A flag that indicates the default behaviour. In case `omit` is given, the output variable will not be 
+  (over-) written and the step returns normally, if no matching entry in the lookup table is found. In case `lookup` 
+  (default) is given, a default clause must be present or an error will be raised.
+
+The following configuration example sets the `type` message key, based on the data type of the `value` key.
+```yaml
+channels:
+  forecasts_weather:
+    trigger:
+      stream id: "forecasts.weather"
+    
+    steps:  
+      - type: "ResolveDataType"
+        source:
+          - type_of: "value"  # Use the type of the value function. This may also be shortened by 'source: "value"'
+        lookup_table:         # Define the type lookup mechanism
+          float: "float-value"
+          bool: "bool-value"
+        output_key: "type"    # Define the destination of the resolved types (i.e. "float-value" and "bool-value"
+    
+    data sink:
+      table: "forecasts"
+```
+
+Multiple sources may be combined as follows:
+```yaml
+channels:
+  forecasts_weather:
+    trigger:
+      stream id: "forecasts.weather"
+
+    steps:
+      - type: "ResolveDataType"
+        source:
+          - value_of: "name"
+          - value_of: "device_id"
+        lookup_table:
+          ("air_temperature", "device_0"): "outside-air"  # One tuple element per source
+          ("air_temperature", "device_1"): "inside-air"
+          "_default": "auxiliary-measurements"            # Default value in case none of the above matches
+    
+    data sink:
+      table: "forecasts"
+```
+
+## Dynamic Table Configurations
+
 The data sink allows to dynamically select the table and column mapping based on the contents of a message field. The 
 message key that selects the destination is configured by the `table_key` configuration. Instead of a single 
 configuration, multiple configurations can be configured via the `tables` configuration followed by a dictionary of 
