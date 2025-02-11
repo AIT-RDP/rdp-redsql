@@ -18,7 +18,7 @@ class TypeSource(pydantic.BaseModel):
 
 class ContentSource(pydantic.BaseModel):
     """Defines a source config referencing a particular variable value"""
-    content_of: str = pydantic.Field(description="The message field key to directly extract the value")
+    value_of: str = pydantic.Field(description="The message field key to directly extract the value")
 
 
 SourceEntryType = Union[TypeSource, ContentSource]
@@ -148,12 +148,12 @@ class ResolveDataType(abstract_step.AbstractOneToOneStep):
     def _extract_content_source(self, source: ContentSource, index: int, message: Dict[str, Any]):
         """Extracts the type source and returns it"""
 
-        if source.content_of not in message:
+        if source.value_of not in message:
             raise exc.MessageFormatError(
-                f"Message key '{source.content_of}' of {index}-th source of "
+                f"Message key '{source.value_of}' of {index}-th source of "
                 f"{self._channel_name}.{self._step_name} not found.",
                 triggering_message=message
             )
 
-        value = message[source.content_of]
+        value = message[source.value_of]
         return value

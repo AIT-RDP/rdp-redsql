@@ -45,7 +45,7 @@ def test_resolve_type_joint_key():
     config = {
         "source": [
             {"type_of": "val"},
-            {"content_of": "na"},
+            {"value_of": "na"},
         ],
         "lookup_table": {
             ("float", "power"): "float.power",
@@ -96,7 +96,7 @@ def test_resolve_type_omit_message():
 
     config = {
         "source": [
-            {"content_of": "na"},
+            {"value_of": "na"},
         ],
         "lookup_table": {
             "power": "float.power",
@@ -124,7 +124,7 @@ def test_resolve_type_lookup_error():
 
     config = {
         "source": [
-            {"content_of": "na"},
+            {"value_of": "na"},
         ],
         "lookup_table": {
             "power": "float.power",
@@ -146,7 +146,7 @@ def test_resolve_type_content_key_error():
 
     config = {
         "source": [
-            {"content_of": "missing_key"},
+            {"value_of": "missing_key"},
         ],
         "lookup_table": {
             "power": "float.power",
