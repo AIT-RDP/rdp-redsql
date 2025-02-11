@@ -17,8 +17,9 @@ test_python_3_10:
     - name: ${CI_DEPENDENCY_PROXY_DIRECT_GROUP_IMAGE_PREFIX}/postgres
       alias: postgres
   tags:
-    - docker
-    - x86_64
+    - ito
+#    - docker
+#    - x86_64
   image: ${CI_DEPENDENCY_PROXY_DIRECT_GROUP_IMAGE_PREFIX}/python:3.10
   variables:
     REDSQL_REDIS_HOST: "redis"
