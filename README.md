@@ -65,7 +65,7 @@ pytest test
 ## Configuration
 ### Basic Input-Output Mapping
 The configuration is read from a YAML file passed on to the `redsql` executable. An exemplary configuration can be found
-in [the test data direcotry](data/test/extensive-config.yml). The `database connection` and `redis` statements globally
+in [the test data directory](data/test/extensive-config.yml). The `database connection` and `redis` statements globally
 define the connection parameters to the data sink and source, respectively. External environment variables can be
 referenced by `!env-template` expressions. E.g.:
 
@@ -361,6 +361,60 @@ channels:
     data sink:
       table: "forecasts"
 ```
+
+## Dynamic Table Configurations
+
+There are some use-cases where data of a single stream should be inserted into different tables or different columns. 
+For instance, in case messages hold values of different data type, (e.g., float, boolean, objects), the destination 
+needs to be dynamically adjusted.
+The data sink allows to dynamically select the table and column mapping based on the contents of a message field. The 
+message key that selects the destination is configured by the `table_key` configuration. Instead of a single 
+configuration, multiple configurations can be configured via the `tables` configuration followed by a dictionary of 
+single table configurations. In order to reduce the risk of malicious behaviour by tampered messages, only a statically 
+configured set of table configurations is supported. For each table configuration in the `tables` dictionary, a unique 
+key has to be set. That key is then matched against the content of the `table_key` message field. 
+In the following configuration, two message types are configured, `number` and `flag`.
+
+```yaml
+channels:
+  forecasts_weather:
+    trigger:
+      stream id: "forecasts.weather"
+    
+    data sink:                # Data sink with dynamically selected configurations
+      table_key: "data_type"  # The message key whose value determines the destination  
+      tables:                 # The list of supported table configurations
+        number:               # The identifier of the configuration ("number") 
+          table: "numeric_forecasts"
+          columns:  
+            value: "forecast_value"
+        flag:                 # The identifier of the configuration ("float")
+          table: "boolean_forecasts"
+          columns:  
+            value: "forecast_value"
+```
+
+The first of the following messages would thereby be added to the `boolean_forecasts` table while the second one would 
+be inserted in `numeric_forecasts`.
+
+```json
+{
+  "data_type": "flag",
+  "name": "thunderstorm",
+  "forecast_value": true
+}
+```
+
+```json
+{
+  "data_type": "number",
+  "name": "air_temperature",
+  "forecast_value": 32
+}
+```
+
+To handle unknown or default types without raising an error, the generic `_default` name of a table configuration is 
+supported that matches all `table_key` assignments that are not otherwise specified.
 
 ## Prometheus Metrics
 
