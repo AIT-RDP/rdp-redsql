@@ -219,47 +219,143 @@ def test_sql_sing_invalid_type_conversion(sql_engine, test_table, target_column,
 
 
 @pytest.fixture()
-def test_view(sql_engine, test_table):
+def test_views(sql_engine):
     """Creates a simple test view to indirectly insert data"""
 
     with sql_engine.begin() as con:
         con.execute(sql.text(f"""
-            CREATE OR REPLACE VIEW test_view AS SELECT * FROM {test_table};  
+            CREATE TABLE test_table_unitemporal (
+                    dp_id INTEGER NOT NULL,
+                    valid_time TIMESTAMPTZ DEFAULT NULL,
+                    value DOUBLE PRECISION,
+                    PRIMARY KEY (dp_id, valid_time)
+                );
+            CREATE OR REPLACE VIEW measurements AS SELECT dp_id, valid_time AS obs_time, value 
+                FROM test_table_unitemporal WITH CASCADED CHECK OPTION;
+        """))
+        con.execute(sql.text(f"""
+            CREATE TABLE test_table_bitemporal (
+                    dp_id INTEGER NOT NULL,
+                    valid_time TIMESTAMPTZ DEFAULT NULL,
+                    transaction_time TIMESTAMPTZ DEFAULT NULL,
+                    value DOUBLE PRECISION,
+                    PRIMARY KEY (dp_id, valid_time, transaction_time)
+                );
+            CREATE OR REPLACE VIEW forecasts AS SELECT dp_id, valid_time AS obs_time, transaction_time AS fc_time, value 
+                FROM test_table_bitemporal WITH CASCADED CHECK OPTION;
         """))
 
-    yield "test_view"
+    yield "measurements"
 
     with sql_engine.begin() as con:
         con.execute(sql.text("""
-            DROP VIEW test_view;
+            DROP VIEW measurements;
+            DROP VIEW forecasts;
+            DROP TABLE test_table_unitemporal;
+            DROP TABLE test_table_bitemporal;
         """))
 
 
-def test_sql_sink_view_insert(sql_engine, test_view):
+def test_sql_sink_view_insert(sql_engine, test_views):
     """Tests the data insert on a view"""
 
     config = {
-        "table": test_view
+        "table": "measurements"
     }
     table_sink = sink.SQLTableSink(config, sql_engine, "test-sink")
 
     message = {
         "dp_id": 1,
         "obs_time": pd.to_datetime("2024-12-31T00:00:00Z"),
-        "value_float": 32.0
+        "value": 32.0
     }
 
     table_sink.insert_messages([message])
 
     with sql_engine.connect() as con:
         data = pd.read_sql("""
-                SELECT dp_id, obs_time, value_int, value_float, value_text FROM test_table ORDER BY dp_id
+                SELECT dp_id, valid_time, value FROM test_table_unitemporal ORDER BY dp_id
             """, con)
 
     pd.testing.assert_frame_equal(data, pd.DataFrame({
         "dp_id": [1],
-        "obs_time": pd.to_datetime(["2024-12-31T00:00:00Z"]),
-        "value_int": [42],
-        "value_float": [32.],
-        "value_text": ["Nothing to add"]
+        "valid_time": pd.to_datetime(["2024-12-31T00:00:00Z"]),
+        "value": [32.],
+    }), check_names=False)
+
+
+def test_sql_sink_view_insert_duplicate_measurements(sql_engine, test_views):
+    """Tests the data insert on a view updating duplicate values"""
+
+    config = {
+        "table": "measurements",
+        "update duplicate values": True
+    }
+    table_sink = sink.SQLTableSink(config, sql_engine, "test-sink")
+
+    messages = [
+        {
+            "dp_id": 1,
+            "obs_time": pd.to_datetime("2024-12-31T00:00:00Z"),
+            "value": 32.0
+        },
+        {
+            "dp_id": 1,
+            "obs_time": pd.to_datetime("2024-12-31T00:00:00Z"),
+            "value": 33.0
+        }
+
+    ]
+
+    table_sink.insert_messages(messages)
+
+    with sql_engine.connect() as con:
+        data = pd.read_sql("""
+                SELECT dp_id, valid_time, value FROM test_table_unitemporal ORDER BY dp_id
+            """, con)
+
+    pd.testing.assert_frame_equal(data, pd.DataFrame({
+        "dp_id": [1],
+        "valid_time": pd.to_datetime(["2024-12-31T00:00:00Z"]),
+        "value": [33.],
+    }), check_names=False)
+
+
+def test_sql_sink_view_insert_duplicate_forecasts(sql_engine, test_views):
+    """Tests the data insert on a view updating duplicate values"""
+
+    config = {
+        "table": "forecasts",
+        "update duplicate values": True
+    }
+    table_sink = sink.SQLTableSink(config, sql_engine, "test-sink")
+
+    messages = [
+        {
+            "dp_id": 1,
+            "obs_time": pd.to_datetime("2024-12-31T00:00:00Z"),
+            "fc_time": pd.to_datetime("2024-12-30T00:00:00Z"),
+            "value": 32.0
+        },
+        {
+            "dp_id": 1,
+            "obs_time": pd.to_datetime("2024-12-31T00:00:00Z"),
+            "fc_time": pd.to_datetime("2024-12-30T00:00:00Z"),
+            "value": 33.0
+        }
+
+    ]
+
+    table_sink.insert_messages(messages)
+
+    with sql_engine.connect() as con:
+        data = pd.read_sql("""
+                SELECT dp_id, valid_time, transaction_time, value FROM test_table_bitemporal ORDER BY dp_id
+            """, con)
+
+    pd.testing.assert_frame_equal(data, pd.DataFrame({
+        "dp_id": [1],
+        "valid_time": pd.to_datetime(["2024-12-31T00:00:00Z"]),
+        "transaction_time": pd.to_datetime(["2024-12-30T00:00:00Z"]),
+        "value": [33.],
     }), check_names=False)

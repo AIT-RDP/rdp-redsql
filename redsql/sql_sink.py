@@ -2,7 +2,8 @@
 Implements the SQL table sink that pushes the data to the database
 """
 import logging
-from typing import Dict, Iterable, Any
+import warnings
+from typing import Dict, Iterable, Any, List
 
 import prometheus_client as prom
 import pydantic
@@ -78,7 +79,7 @@ class _PrecompiledTableSink:
 
         def default_cast(x):
             return x
-        
+
         supported_casts = {
             tp.__name__: tp
             for tp in [float, int, bool, str]
@@ -100,24 +101,62 @@ class _PrecompiledTableSink:
             logger.debug(f"Update duplicate values in {destination_table.name}. This feature requires PostgreSQL.")
             import sqlalchemy.dialects.postgresql as pg_dialect  # Requires PostgreSQL
 
-            primary_keys = [c for c in destination_table.constraints if isinstance(c, sql.PrimaryKeyConstraint)]
-            if len(primary_keys) != 1:
-                raise ValueError(f"It is requested to update duplicate values but {destination_table.name} "
-                                 f"does not have a unique primary key: {primary_keys}")
-
             ins_stmt = pg_dialect.insert(destination_table)
+            primary_key_columns = _PrecompiledTableSink._infer_primary_key_columns(destination_table, logger)
 
             update_mapping = {
                 # PG creates an intermediate excluded table for all invalid statements that needs to be referenced
                 col: getattr(ins_stmt.excluded, col.name)
-                for col in destination_table.columns if col.name not in primary_keys[0].columns
+                for col in destination_table.columns if col.name not in primary_key_columns
             }
-            ins_stmt = ins_stmt.on_conflict_do_update(index_elements=list(primary_keys[0].columns), set_=update_mapping)
+            ins_stmt = ins_stmt.on_conflict_do_update(index_elements=primary_key_columns, set_=update_mapping)
         else:
             ins_stmt = sql.insert(destination_table)
 
         logger.debug(f"Compiled insert statement: {ins_stmt}")
         return ins_stmt
+
+    @staticmethod
+    def _infer_primary_key_columns(destination_table: sql.Table, logger: logging.Logger) -> List[str]:
+        """
+        Tries to infer the primary key columns of the table and returns the result.
+
+        For tables this can be done automatically. However, for views, only an empty primary key will be returned.
+        Since we miss a sane way of querying the affected primary key columns automatically, and we don't want to break
+        tons of existing code, some default rules will apply. In case have other needs and need them configured,
+        consider opening a ticket.
+
+        :param destination_table: The table to fetch the primary key columns from
+        :return: The inferred list of primary key column names
+        """
+
+        known_views = {
+            "measurements": ["dp_id", "obs_time"],
+            "forecasts": ["dp_id", "obs_time", "fc_time"]
+        }
+
+        primary_keys = [c for c in destination_table.constraints if isinstance(c, sql.PrimaryKeyConstraint)]
+        if len(primary_keys) != 1:
+            raise ValueError(f"It is requested to update duplicate values but {destination_table.name} "
+                             f"does not have a unique primary key: {primary_keys}")
+
+        columns = list(primary_keys[0].columns)
+
+        if len(columns) <= 0 and (
+                destination_table.name not in known_views or
+                set(destination_table.columns).issuperset(known_views[destination_table.name])
+        ):
+            raise KeyError(f"The destination table {destination_table.name} appears to have no primary key columns for "
+                           "deduplication. This is likely on views that hide destination table. There is also no rule "
+                           "set that enables default inference. Please consider opening a ticket if you really need to "
+                           "update duplicates on that table/view.")
+        elif len(columns) <= 0:
+            columns = known_views[destination_table.name]
+            logger.warning(f"The destination table {destination_table.name} appears to be a view. It is assumed that "
+                           f"the primary key columns are {columns}. However, consider directly writing to the "
+                           "destination table instead.")
+
+        return columns
 
     def insert(self, message: Dict[str, Any], sql_connection: sql.Connection):
         """
