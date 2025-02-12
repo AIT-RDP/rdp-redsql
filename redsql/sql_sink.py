@@ -207,7 +207,8 @@ class SQLTableSink:
         self._logger.debug(f"Try to access meta data from the SQL engine {sql_engine}")
         self._sql_engine = sql_engine
         self._sql_meta = sql.MetaData()
-        self._sql_meta.reflect(bind=sql_engine)
+        # views need to be set to True, otherwise they will not be shown in the list of tables (#49)
+        self._sql_meta.reflect(bind=sql_engine, views=True)
         self._logger.debug(f"SQL schema successfully retrieved.")
 
         table_config = self._get_table_config(config, channel_name)
