@@ -4,6 +4,7 @@ Specifically assesses the SQL sink
 
 import pandas as pd
 import pytest
+import sqlalchemy as sql
 
 import redsql.sql_sink as sink
 import redsql.exc as exc
@@ -215,3 +216,50 @@ def test_sql_sing_invalid_type_conversion(sql_engine, test_table, target_column,
     }
     with pytest.raises(exc.MessageFormatError, match=".*[Uu]nable to cast.*"):
         table_sink.insert_messages([message])
+
+
+@pytest.fixture()
+def test_view(sql_engine, test_table):
+    """Creates a simple test view to indirectly insert data"""
+
+    with sql_engine.begin() as con:
+        con.execute(sql.text(f"""
+            CREATE OR REPLACE VIEW test_view AS SELECT * FROM {test_table};  
+        """))
+
+    yield "test_view"
+
+    with sql_engine.begin() as con:
+        con.execute(sql.text("""
+            DROP VIEW test_view;
+        """))
+
+
+def test_sql_sink_view_insert(sql_engine, test_view):
+    """Tests the data insert on a view"""
+
+    config = {
+        "table": test_view
+    }
+    table_sink = sink.SQLTableSink(config, sql_engine, "test-sink")
+
+    message = {
+        "dp_id": 1,
+        "obs_time": pd.to_datetime("2024-12-31T00:00:00Z"),
+        "value_float": 32.0
+    }
+
+    table_sink.insert_messages([message])
+
+    with sql_engine.connect() as con:
+        data = pd.read_sql("""
+                SELECT dp_id, obs_time, value_int, value_float, value_text FROM test_table ORDER BY dp_id
+            """, con)
+
+    pd.testing.assert_frame_equal(data, pd.DataFrame({
+        "dp_id": [1],
+        "obs_time": pd.to_datetime(["2024-12-31T00:00:00Z"]),
+        "value_int": [42],
+        "value_float": [32.],
+        "value_text": ["Nothing to add"]
+    }), check_names=False)
