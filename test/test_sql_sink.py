@@ -284,12 +284,15 @@ def test_sql_sink_view_insert(sql_engine, test_views):
     }), check_names=False)
 
 
-def test_sql_sink_view_insert_duplicate_measurements(sql_engine, test_views):
+@pytest.mark.parametrize("dup_config_key", [
+    "update duplicate values", "update_duplicate_values"
+])
+def test_sql_sink_view_insert_duplicate_measurements(sql_engine, test_views, dup_config_key):
     """Tests the data insert on a view updating duplicate values"""
 
     config = {
         "table": "measurements",
-        "update duplicate values": True
+        dup_config_key: True  # Test the alias mechanism
     }
     table_sink = sink.SQLTableSink(config, sql_engine, "test-sink")
 
