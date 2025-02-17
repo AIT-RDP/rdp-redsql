@@ -20,7 +20,8 @@ class TableConfig(pydantic.BaseModel):
     columns: Dict[str, str] = pydantic.Field(description="The mapping of table columns to message keys", default={})
 
     update_duplicate_values: bool = pydantic.Field(
-        description="Override duplicates in the table", default=False, alias="update duplicate values"
+        description="Override duplicates in the table", default=False,
+        validation_alias=pydantic.AliasChoices("update_duplicate_values", "update duplicate values")
     )
 
 
