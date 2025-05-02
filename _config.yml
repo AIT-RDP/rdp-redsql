@@ -1,0 +1,7 @@
+# Configuration for the documentation hosted via Github pages 
+remote_theme: pages-themes/minimal@v0.2.0
+plugins:
+- jekyll-remote-theme
+title: RedSQL Data Sync
+description: Generic Redis to SQL data synchronizer
+show_downloads: true
