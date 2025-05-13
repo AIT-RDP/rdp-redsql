@@ -492,3 +492,8 @@ Note that setting the global configuration `prometheus client: None` will disabl
 
 ![Exemplary Grafana dashboard](docs/grafana-teaser.png)
 
+When configuring the Prometheus connection in your Grafana, make sure that the scrape interval in the connection 
+settings matches the interval in the Prometheus configuration. Otherwise, artefacts and suppressed spikes in the 
+output graphics may be visible:
+
+![Prometheus Scrape Interval Settings](docs/grafana-prometheus-scrape-interval.png)
