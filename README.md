@@ -28,10 +28,14 @@ The `gitlab-intern.ait.ac.at:5010/ees/rdp/generic-components/redsql` container d
 
 
 ## Installation (Development Setup)
-The development packages can be found in the conda environment definition: 
+The development dependencies are managed by a UV environment definition. Before installing the dependencies, make sure 
+that the environment variables `UV_INDEX_RDP_COMMONS_PASSWORD` and `UV_INDEX_RDP_COMMONS_USERNAME` are set to access 
+your private package index. As of writing, pyrdp-common is only available as source code. Hence, a private registry is 
+needed. Make sure to adjust the link to the private registry, if needed.  
+
+The dependencies cna then be installed by running the following command in the root of the repository:
 ```shell
-conda env create -f environment.yml
-conda activate redsql
+uv sync --all-groups
 ```
 
 For development and testing, RedSQL requires a Redis and PostgreSQL instance best provided via containers. To configure

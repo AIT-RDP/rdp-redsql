@@ -1,16 +1,16 @@
-ARG DOCKER_PROXY_PREFIX
-FROM ${DOCKER_PROXY_PREFIX}python:3.10
+FROM ghcr.io/astral-sh/uv:python3.13-alpine
 
-ARG TOKEN_PYRDP_COMMONS
-ENV TOKEN_PYRDP_COMMONS=$TOKEN_PYRDP_COMMONS
+WORKDIR /usr/redsql
+COPY pyproject.toml uv.lock ./
 
-WORKDIR /usr/src/app
+RUN --mount=type=secret,id=repo-env,target=/kaniko/.secret.env \
+    ls -la /kaniko/ && export $(cat /kaniko/.secret.env | grep -v -e '^\s*#.*' | sed 's/\r//g' | xargs) && \
+    touch README.md && uv sync --compile-bytecode --no-cache --no-managed-python && \
+    addgroup -S redsql && adduser -g redsql -S -s /bin/sh redsql
 
-COPY requirements.txt setup.py setup.cfg setup.py versioneer.py ./
-COPY redsql ./redsql
-COPY docker/etc/redsql /etc/redsql
+COPY --chmod=755 redsql ./redsql
+COPY --chmod=755 docker/etc/redsql /etc/redsql
 
-RUN pip install --no-cache-dir -r requirements.txt && \
-    pip install --no-cache-dir .
-
-CMD ["redsql", "--config", "/etc/redsql/config.yml"]
+USER redsql:redsql
+ENV PATH="/usr/redsql/.venv/bin:$PATH"
+CMD ["python", "-m", "redsql", "--config", "/etc/redsql/config.yml"]

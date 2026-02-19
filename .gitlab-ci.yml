@@ -2,14 +2,21 @@ stages:
   - build
   - release
 
+variables:
+  UV_INDEX_RDP_COMMONS_USERNAME: "__token__"
+  UV_INDEX_RDP_COMMONS_PASSWORD: $TOKEN_PYRDP_COMMONS
+
 include:
-  - component: "$CI_SERVER_FQDN/ees/rdp/generic-components/rdp-cicd-components/kaniko@main"
+  - component: $CI_SERVER_FQDN/ees/rdp/generic-components/rdp-cicd-components/kaniko@main
+    inputs:
+      secret-envs: UV_INDEX_RDP_COMMONS_USERNAME UV_INDEX_RDP_COMMONS_PASSWORD
+      build-args: --build-arg CI_COMMIT_SHA=$CI_COMMIT_SHA --build-arg CI_COMMIT_TIMESTAMP=$CI_COMMIT_TIMESTAMP
 
 # =============================================================================
 # Perform the unit test
 # =============================================================================
 
-test_python_3_10:
+test_python_3_13:
   stage: build  # Docker-image creation and tests can run in parallel
   services:
     - name: ${CI_DEPENDENCY_PROXY_DIRECT_GROUP_IMAGE_PREFIX}/redis
@@ -17,10 +24,9 @@ test_python_3_10:
     - name: ${CI_DEPENDENCY_PROXY_DIRECT_GROUP_IMAGE_PREFIX}/postgres
       alias: postgres
   tags:
-    - ito
-#    - docker
-#    - x86_64
-  image: ${CI_DEPENDENCY_PROXY_DIRECT_GROUP_IMAGE_PREFIX}/python:3.10
+    - docker
+    - x86_64
+  image: ghcr.io/astral-sh/uv:python3.13-alpine
   variables:
     REDSQL_REDIS_HOST: "redis"
     REDSQL_REDIS_PORT: "6379"
@@ -31,12 +37,18 @@ test_python_3_10:
     REDSQL_DB_URL: "postgresql://postgres:$POSTGRES_PASSWORD@postgres:5432/redsql_testing"
 
   script:
-    - pip install -r requirements.txt
-    - pip install pytest==8.3.2 pandas==2.2.2 # Dedicated testing requirements
-    - PYTHONPATH="${PYTHONPATH}:.:test" pytest --junitxml=report.xml --log-cli-level=DEBUG test
+    - uv sync --all-groups --all-extras
+    - >
+      PYTHONPATH="${PYTHONPATH}:.:test" uv run pytest 
+      --cov --cov-report term --cov-report xml:coverage.xml 
+      --junitxml=report.xml --log-cli-level=DEBUG test
+  coverage: '/(?i)total.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/'
   artifacts:  # Collect test results
     when: always
     paths:
       - report.xml
     reports:
       junit: report.xml
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage.xml
