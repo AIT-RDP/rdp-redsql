@@ -222,3 +222,50 @@ def test_burst_message_handling(redis_pool, burst_config, redis_burst_stream):
 
     # With trim length of 10, after all messages, the stream should be trimmed
     assert stream_length < num_burst_messages, f"Stream should have some trimming effect, but has {stream_length} entries"
+
+
+def test_safe_trimming_mode(redis_pool, burst_config, redis_burst_stream):
+    """
+    Tests the safe trimming mode - verifies that only the oldest message is deleted
+    while the newest messages remain in the stream.
+    """
+    # Create the RedisStreamSource with burst configuration (uses safe trimming mode)
+    source = RedisStreamSource(config=burst_config, redis_pool=redis_pool, channel_name="test_safe_trim_channel")
+
+    # Push 11 messages
+    redis_client = redis.Redis(connection_pool=redis_pool)
+    num_messages = 11
+    message_ids = []
+
+    for i in range(num_messages):
+        message = {
+            "message_id": str(i),
+            "data": f"message_{i}"
+        }
+        msg_id = redis_client.xadd(redis_burst_stream, message)
+        message_ids.append(msg_id)
+
+    # Process all messages
+    for i in range(num_messages):
+        received_message = source.get_next_message()
+        assert received_message is not None, f"Expected to receive message {i}"
+        source.ack_last_message()
+
+    logger.info(f"Successfully processed all {num_messages} messages")
+
+    # Check that the stream contains exactly 10 messages (trim length)
+    stream_info = redis_client.xinfo_stream(redis_burst_stream)
+    stream_length = stream_info["length"]
+    assert stream_length == 10, f"Expected 10 messages in stream, but found {stream_length}"
+
+    # Verify the oldest message (message 0) was deleted
+    range_result = redis_client.xrange(redis_burst_stream, message_ids[0], message_ids[0])
+    assert len(range_result) == 0, "Oldest message should have been deleted"
+
+    # Verify the newest 10 messages (messages 1-10) are still in the stream
+    for i in range(1, num_messages):
+        range_result = redis_client.xrange(redis_burst_stream, message_ids[i], message_ids[i])
+        assert len(range_result) == 1, f"Message {i} should still be in the stream"
+        assert range_result[0][1]["message_id"] == str(i), f"Message {i} content mismatch"
+
+    logger.info("Safe trimming verified: oldest message deleted, newest 10 messages retained")
