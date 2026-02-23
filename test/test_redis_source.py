@@ -35,6 +35,18 @@ def trim_config():
 
 
 @pytest.fixture()
+def burst_config():
+    """Provides a configuration for burst testing with small trim size"""
+    return {
+        "stream id": "test.stream.burst",
+        "group id": "test.group.burst",
+        "consumer id": "test.consumer.burst",
+        "trim_mode": "safe",
+        "trim length": 10
+    }
+
+
+@pytest.fixture()
 def redis_source_stream(redis_pool, basic_config):
     """Creates a Redis stream for testing and cleans it up afterwards"""
     stream_name = basic_config["stream id"]
@@ -50,6 +62,18 @@ def redis_source_stream(redis_pool, basic_config):
 def redis_trim_stream(redis_pool, trim_config):
     """Creates a Redis stream for trim testing and cleans it up afterwards"""
     stream_name = trim_config["stream id"]
+    redis_client = redis.Redis(connection_pool=redis_pool)
+
+    yield stream_name
+
+    # Cleanup
+    redis_client.delete(stream_name)
+
+
+@pytest.fixture()
+def redis_burst_stream(redis_pool, burst_config):
+    """Creates a Redis stream for burst testing and cleans it up afterwards"""
+    stream_name = burst_config["stream id"]
     redis_client = redis.Redis(connection_pool=redis_pool)
 
     yield stream_name
@@ -159,3 +183,42 @@ def test_stream_trimming(redis_pool, trim_config, redis_trim_stream):
     # The key verification: trimming functionality exists and was called
     # Even if not perfectly effective, the mechanism should be in place
     assert stream_length < num_messages, f"Stream should have some trimming effect, but has {stream_length} entries"
+
+
+def test_burst_message_handling(redis_pool, burst_config, redis_burst_stream):
+    """
+    Tests handling a burst of messages - pushes 50 messages in quick succession
+    and verifies they can all be read and acknowledged.
+    """
+    # Create the RedisStreamSource with burst configuration
+    source = RedisStreamSource(config=burst_config, redis_pool=redis_pool, channel_name="test_burst_channel")
+
+    # Push 50 messages in a burst
+    redis_client = redis.Redis(connection_pool=redis_pool)
+    num_burst_messages = 200
+
+    for i in range(num_burst_messages):
+        message = {
+            "message_id": str(i),
+            "data": f"burst_message_{i}"
+        }
+        redis_client.xadd(redis_burst_stream, message)
+
+    # Immediately read all messages
+    for i in range(num_burst_messages):
+        received_message = source.get_next_message()
+        assert received_message is not None, f"Expected to receive burst message {i}"
+        assert received_message["message_id"] == str(i), f"Message ID mismatch for burst message {i}"
+
+        source.ack_last_message()
+
+    logger.info(f"Successfully pushed and acknowledged burst of {num_burst_messages} messages")
+
+    # Check the stream length - with trimming, it should be less than the number of pushed messages
+    stream_info = redis_client.xinfo_stream(redis_burst_stream)
+    stream_length = stream_info["length"]
+
+    logger.info(f"Stream length after burst trimming: {stream_length}")
+
+    # With trim length of 10, after all messages, the stream should be trimmed
+    assert stream_length < num_burst_messages, f"Stream should have some trimming effect, but has {stream_length} entries"
