@@ -56,18 +56,6 @@ def test_table_indexed(sql_engine: sql.engine.Engine) -> str:
         """))
 
 
-@pytest.fixture()
-def redis_test_stream(redis_pool) -> str:
-    """Creates a redis stream and returns it afterwards"""
-
-    stream_name = "test.stream"
-    redis_client = redis.Redis(connection_pool=redis_pool)
-
-    redis_client.xgroup_create(stream_name, "group.test.fixture", "0-0", mkstream=True)
-    yield stream_name
-    redis_client.delete(stream_name)
-
-
 def read_test_table(sql_engine: sql.engine.Engine, table_name="test_table") -> pd.DataFrame:
     """
     Reads the test table into a DataFrame and returns it

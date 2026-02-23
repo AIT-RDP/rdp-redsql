@@ -157,6 +157,33 @@ channels:
       table: "forecasts"
 ```
 
+#### Trim Modes
+RedSQL supports two trimming strategies that can be configured via the `trim_mode` parameter:
+
+* `all` (default): Uses Redis's approximate trimming (`XTRIM ... MAXLEN ~ <limit>`) for better performance. This mode 
+  allows the stream to exceed the trim length slightly and may not trim immediately. Note that this can lead to message 
+  loss if the stream receives a burst of messages that exceeds the trim length before the next message is processed. 
+  This mode is recommended for high-throughput scenarios where performance is critical and occasional message loss is 
+  acceptable.
+* `safe`: Deletes only the oldest message when the trim length is exceeded, ensuring precise control over stream size. 
+  This mode is recommended when exact stream length limits are critical or when processing message bursts.
+
+The `safe` mode is particularly useful for preventing message loss during burst scenarios where many messages arrive 
+faster than they can be processed. It ensures that unprocessed messages are retained even when the trim length is 
+reached. However, it may lead to increased memory usage if the stream receives a large number of messages in a short 
+period.
+
+```yaml
+channels:
+  forecasts_weather:
+    trigger:
+      stream id: "forecasts.weather"
+      trim length: 200
+      trim_mode: "safe"  # Use safe trimming mode
+    data sink:
+      table: "forecasts"
+```
+
 ### Transformation Steps
 Transformation rules can be defined to change the message format of the incoming messages to a format understood by the
 database. They are defined by a series of sequentially applied steps that transform the input message(s) to a series 
