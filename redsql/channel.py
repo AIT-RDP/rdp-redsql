@@ -4,6 +4,7 @@ Defines facilities to manage channels transforming Redis input messages to SQL s
 import importlib
 import inspect
 import logging
+import time
 from typing import Optional, List
 
 import prometheus_client as prom
@@ -112,7 +113,16 @@ class Channel:
         :param sql_engine: The possibly shared DB engine to create the connection from
         """
 
-        self._data_source = redis_source.RedisStreamSource(self._config["trigger"], redis_pool, self._channel_name)
+        # Check if batching is enabled in data sink
+        batch_interval = self._config["data sink"].get("batch_interval", None)
+
+        # Auto-enable no_ack if batching is enabled
+        trigger_config = self._config["trigger"].copy()
+        if batch_interval is not None and "no_ack" not in trigger_config:
+            trigger_config["no_ack"] = True
+            self._logger.info(f"Auto-enabled no_ack for channel {self._channel_name} because batch_interval is configured")
+
+        self._data_source = redis_source.RedisStreamSource(trigger_config, redis_pool, self._channel_name)
         self._data_sink = SQLTableSink(self._config["data sink"], sql_engine, self._channel_name)
 
         self._logger.debug(f"Initialize external resources on all {len(self._transformation_steps)} steps.")
@@ -130,6 +140,7 @@ class Channel:
 
         message = self._data_source.get_next_message()
         if message is not None:
+            start_time = time.perf_counter()
 
             output_messages = [message]
             batch_size = len(output_messages)
@@ -137,13 +148,30 @@ class Channel:
 
             try:
                 # Run the processing steps and push the result
+                step_start = time.perf_counter()
                 for step in self._transformation_steps:
                     output_messages = step.transform_messages(output_messages)
+
+                step_duration_ms = (time.perf_counter() - step_start) * 1000
+
+                insert_start = time.perf_counter()
                 self._data_sink.insert_messages(output_messages)
+                insert_duration_ms = (time.perf_counter() - insert_start) * 1000
+
+                total_duration_ms = (time.perf_counter() - start_time) * 1000
+
                 self._prom_message_cnt.labels(channel_name=self._channel_name, type="success").inc(batch_size)
 
+                # Log timing information
+                self._logger.debug(
+                    f"Processed message in {total_duration_ms:.2f}ms "
+                    f"(steps: {step_duration_ms:.2f}ms, insert: {insert_duration_ms:.2f}ms, "
+                    f"output_count: {len(list(output_messages))})"
+                )
+
             except exc.MessageFormatError as e:
-                self._data_source.ack_last_message()  # Permanent error. Remove the message from the queue
+                if not self._data_source._no_ack:
+                    self._data_source.ack_last_message()  # Permanent error. Remove the message from the queue
                 e.external_message = message
                 self._prom_message_cnt.labels(channel_name=self._channel_name, type="err_format").inc(batch_size)
                 raise
@@ -151,7 +179,9 @@ class Channel:
                 self._prom_message_cnt.labels(channel_name=self._channel_name, type="err_general").inc(batch_size)
                 raise
 
-            self._data_source.ack_last_message()
+            # ACK message if no_ack is disabled.
+            if not self._data_source._no_ack:
+                self._data_source.ack_last_message()
 
     def close(self):
         """
