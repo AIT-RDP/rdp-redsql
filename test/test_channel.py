@@ -69,7 +69,7 @@ def read_test_table(sql_engine: sql.engine.Engine, table_name="test_table") -> p
             SELECT dp_id, obs_time, value_int, value_float, value_text FROM {table_name};
         """, con.connection, index_col="dp_id")
     ret = ret.sort_index()
-    ret.index.name = None  # Mare writing reference tables easier
+    ret.index.name = None  # Make writing reference tables easier
     return ret
 
 

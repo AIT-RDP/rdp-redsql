@@ -1,9 +1,10 @@
 """
 Implements the SQL table sink that pushes the data to the database
 """
+import io
 import logging
-import warnings
-from typing import Dict, Iterable, Any, List
+import time
+from typing import Dict, Iterable, Any, List, Optional
 
 import prometheus_client as prom
 import pydantic
@@ -11,6 +12,7 @@ import sqlalchemy as sql
 import sqlalchemy.exc
 
 from redsql import exc as exc
+import json
 
 
 class TableConfig(pydantic.BaseModel):
@@ -48,10 +50,14 @@ class _PrecompiledTableSink:
         self._logger.debug(f"Determine the column mapping of {table_id} (DB table {self._destination_table.name}): "
                            f"{self._column_mapping}")
 
+        self._update_duplicates = table_config.update_duplicate_values
         self._insert_statement = self._compile_insert_statement(
             self._destination_table, self._logger,
-            update_duplicates=table_config.update_duplicate_values
+            update_duplicates=self._update_duplicates
         )
+
+        # Detect if destination is a view - COPY doesn't work with views
+        self._is_view = self._destination_table.info.get('is_view', False) or len(list(self._destination_table.primary_key)) == 0
 
     @staticmethod
     def _get_column_mapping(column_config: dict, destination_table: sql.Table, channel_name: str) -> Dict[str, str]:
@@ -159,6 +165,33 @@ class _PrecompiledTableSink:
 
         return columns
 
+    def _deduplicate_batch(self, output_data_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Deduplicates a batch of messages by primary key, keeping only the last occurrence.
+
+        This is necessary when using ON CONFLICT DO UPDATE because PostgreSQL doesn't allow
+        updating the same row multiple times in a single statement.
+
+        :param output_data_list: List of processed message dictionaries
+        :return: Deduplicated list with only the last occurrence of each primary key
+        """
+        if not output_data_list:
+            return output_data_list
+
+        # Get the primary key columns for this table
+        primary_key_columns = self._infer_primary_key_columns(self._destination_table, self._logger)
+
+        # Build a dictionary keyed by primary key tuple, keeping last occurrence
+        unique_rows = {}
+        for row_data in output_data_list:
+            # Create a tuple of primary key values for this row
+            pk_values = tuple(row_data.get(col) for col in primary_key_columns)
+            # Store the row, overwriting any previous row with the same key
+            unique_rows[pk_values] = row_data
+
+        # Return the deduplicated list in original order (using dict preservation of insertion order)
+        return list(unique_rows.values())
+
     def insert(self, message: Dict[str, Any], sql_connection: sql.Connection):
         """
         Inserts the given message into the database
@@ -184,6 +217,97 @@ class _PrecompiledTableSink:
                                              f"{e.params}: {e.detail}, {e.orig}",
                                              triggering_message=e.params)
             raise new_err from e
+
+    def insert_batch(self, messages: List[Dict[str, Any]], sql_connection: sql.Connection):
+        """
+        Inserts multiple messages into the database in a single batch operation
+
+        :param messages: List of messages to be inserted
+        :param sql_connection: The open sql connection to execute the corresponding insert statements
+        """
+
+        if not messages:
+            return
+
+        # Process all messages: remap and cast
+        output_data_list = []
+        for message in messages:
+            output_data = self._remap_message(message)
+            output_data = self._cast_message(output_data)
+            output_data_list.append(output_data)
+
+        # Only use COPY if we don't need update_duplicates because upsert does not work with copy
+        # and we don't want to use COPY for views because it's not supported by PostgreSQL
+        if not self._update_duplicates and not self._is_view:
+            try:
+                self._insert_with_copy(output_data_list, sql_connection)
+                return
+            except Exception as copy_err:
+                self._logger.warning(f"COPY failed for {self._destination_table.name}: {copy_err}")
+
+        # When using update_duplicates, deduplicate the batch to avoid cardinality violations
+        # PostgreSQLs ON CONFLICT DO UPDATE doesn't allow updating the same row twice in one statement,
+        # but existing ones are still updated
+        if self._update_duplicates:
+            output_data_list = self._deduplicate_batch(output_data_list)
+
+        try:
+            # Use insert for upserts
+            sql_connection.execute(self._insert_statement, output_data_list)
+        except sqlalchemy.exc.DatabaseError as e:
+            raise exc.MessageFormatError(f"Unable to insert batch into {self._destination_table.name}: {e}") from e
+
+    def _insert_with_copy(self, output_data_list: List[Dict[str, Any]], sql_connection: sql.Connection):
+        """
+        Uses PostgreSQL COPY command for batch insert if we really have a lot of data
+        This is not really slower than the normal insert to it is the preferred method if
+        the data does not need to be upserted.
+
+        :param output_data_list: List of processed message dictionaries
+        :param sql_connection: The open sql connection
+        """
+        if not output_data_list:
+            return
+
+        # Get ordered column names from the first message
+        columns = list(output_data_list[0].keys())
+        column_names = ', '.join(f'"{col}"' for col in columns)
+
+        # Create tab-delimited data in memory
+        buffer = io.StringIO()
+        for row_data in output_data_list:
+            row_values = []
+            for col in columns:
+                value = row_data.get(col)
+                if value is None:
+                    row_values.append('\\N')  # PostgreSQL NULL representation
+                elif isinstance(value, str):
+                    # Escape special characters for COPY format
+                    escaped = value.replace('\\', '\\\\').replace('\n', '\\n').replace('\r', '\\r').replace('\t', '\\t')
+                    row_values.append(escaped)
+                elif isinstance(value, (dict, list)):
+                    # Handle JSONB columns
+                    json_str = json.dumps(value).replace('\\', '\\\\').replace('\n', '\\n').replace('\r', '\\r').replace('\t', '\\t')
+                    row_values.append(json_str)
+                else:
+                    row_values.append(str(value))
+            buffer.write('\t'.join(row_values) + '\n')
+
+        # Reset buffer position to beginning
+        buffer.seek(0)
+
+        # Get raw connection for COPY
+        raw_connection = sql_connection.connection.driver_connection
+        cursor = raw_connection.cursor()
+
+        try:
+            # Execute COPY command
+            copy_sql = f'COPY {self._destination_table.name} ({column_names}) FROM STDIN'
+            self._logger.debug(f"Executing COPY command: {copy_sql} with: \n{buffer.getvalue()}")
+            cursor.copy_expert(copy_sql, buffer)
+        finally:
+            cursor.close()
+            buffer.close()
 
     def _remap_message(self, message: Dict[str, Any]) -> Dict[str, Any]:
         """Extracts the column values from the message and returns them"""
@@ -266,6 +390,38 @@ class SQLTableSink:
 
         self._prom_insert_cnt.labels(channel_name=channel_name)
 
+        # Time-based batching: configurable via batch_interval (defaults to None = immediate insert)
+        self._batch_buffer = []  # Accumulated messages
+        self._batch_start_time = None  # When current batch started
+        self._batch_interval = config.get("batch_interval", None)  # Flush interval in seconds (None = no batching)
+
+    def _group_messages_by_sink(self, messages: List[Dict[str, Any]]) -> Dict[int, Dict]:
+        """
+        Groups messages by their destination table sink.
+
+        :param messages: List of messages to group
+        :return: Dictionary mapping sink_id to {sink, messages}
+        """
+        messages_by_sink = {}
+        for message in messages:
+            sink = self._get_destination_table(message)
+            sink_id = id(sink)
+            if sink_id not in messages_by_sink:
+                messages_by_sink[sink_id] = {"sink": sink, "messages": []}
+            messages_by_sink[sink_id]["messages"].append(message)
+        return messages_by_sink
+
+    def _execute_with_connection(self, operation):
+        """
+        Executes the given operation with a database connection from the pool.
+
+        :param operation: A callable that takes a connection as its only argument
+        """
+        # TODO: It seems like this is fast enough, maybe later we need one dedicated connection per channel
+        with self._sql_engine.connect() as conn:
+            with conn.begin():
+                operation(conn)
+
     @staticmethod
     def _get_table_config(config: dict, channel_name: str) -> Dict[str, TableConfig]:
         """Resolves the configuration stanzas using the backwards-compatibility rules"""
@@ -284,6 +440,7 @@ class SQLTableSink:
         else:
             return {"_default": TableConfig.model_validate(config)}
 
+
     def insert_messages(self, messages: Iterable[Dict[str, Any]]):
         """
         Inserts the given messages into the database
@@ -292,21 +449,81 @@ class SQLTableSink:
         columns are not defined in the configuration section, it is assumed that each message contains a key with the
         respective column name.
 
+        If batch_interval is configured, messages are accumulated and flushed after the interval.
+        If batch_interval is None (default), messages are inserted immediately.
+
         :param messages: An iterable of messages. Each message must be composed of generic key-value pairs.
         """
 
         self._logger.debug(f"Start to compute table representation and insert samples for channel {self._channel_name}")
         output_data = list(messages)
 
-        self._logger.debug(f"Begin to insert {len(output_data)} row(s) for {self._channel_name}")
-        with self._sql_engine.connect() as sql_connection:
-            with sql_connection.begin():  # Open a new transaction to avoid caching issues
-                for idx, message in enumerate(output_data):
-                    sink = self._get_destination_table(message)
-                    sink.insert(message, sql_connection)
+        # If no batching configured, insert immediately
+        if self._batch_interval is None:
+            self._insert_immediate(output_data)
+            return
+
+        # Batching enabled: add messages to buffer
+        self._batch_buffer.extend(output_data)
+
+        # Initialize batch timer on first message
+        if self._batch_start_time is None:
+            self._batch_start_time = time.time()
+
+        # Check if it's time to flush
+        elapsed = time.time() - self._batch_start_time
+        if elapsed >= self._batch_interval:
+            self._flush_batch()
+
+    def _insert_immediate(self, output_data: List[Dict[str, Any]]):
+        """Immediately inserts messages - uses batch insert if no updates required, otherwise one-by-one"""
+        self._logger.debug(f"Begin to insert {len(output_data)} row(s) immediately for {self._channel_name}")
+
+        # Group messages by destination table
+        messages_by_sink = self._group_messages_by_sink(output_data)
+
+        def do_insert(conn):
+            for sink_data in messages_by_sink.values():
+                sink = sink_data["sink"]
+                batch_messages = sink_data["messages"]
+                sink.insert_batch(batch_messages, conn)
+
+        self._execute_with_connection(do_insert)
 
         self._prom_insert_cnt.labels(channel_name=self._channel_name).inc(len(output_data))
         self._logger.debug(f"Successfully inserted {len(output_data)} row(s) for {self._channel_name}")
+
+    def _flush_batch(self):
+        """Flushes the accumulated batch to the database"""
+
+        if not self._batch_buffer:
+            return
+
+        batch_size = len(self._batch_buffer)
+        self._logger.debug(f"Flushing batch of {batch_size} messages for {self._channel_name}")
+
+        # Group messages by destination table
+        messages_by_sink = self._group_messages_by_sink(self._batch_buffer)
+
+        def do_batch_insert(conn):
+            for sink_data in messages_by_sink.values():
+                sink = sink_data["sink"]
+                batch_messages = sink_data["messages"]
+                self._logger.debug(f"Batch inserting {len(batch_messages)} messages to table {sink._destination_table.name}")
+                sink.insert_batch(batch_messages, conn)
+
+        self._execute_with_connection(do_batch_insert)
+
+        self._prom_insert_cnt.labels(channel_name=self._channel_name).inc(batch_size)
+        self._logger.debug(f"Successfully inserted {batch_size} row(s) for {self._channel_name}")
+
+        # Clear the buffer and reset timer
+        self._batch_buffer = []
+        self._batch_start_time = None
+
+    def flush(self):
+        """Public method to force flush the current batch"""
+        self._flush_batch()
 
     def _get_destination_table(self, message) -> _PrecompiledTableSink:
         """Resolves the table sink based on the given message properties"""
@@ -329,4 +546,5 @@ class SQLTableSink:
 
     def close(self):
         """Closes the database connection and frees allocated resources"""
-        self._sql_engine = None
+        # Flush any remaining messages in the buffer
+        self._flush_batch()

@@ -103,6 +103,7 @@ class RedisStreamSource:
         self._stream_name = config["stream id"]
         self._group_name = config.get("group id", f"group.{self._stream_name}.{channel_name}")
         self._consumer_name = config.get("consumer id", f"consumer.{self._stream_name}.{channel_name}")
+        self._no_ack = config.get("no_ack", False)  # Feature flag: skip acknowledgments (default: False)
 
         self._last_message_id = None
         self._trimmer = self._resolve_trimming_strategy(config, self._redis_client, self._stream_name, channel_name)
@@ -147,7 +148,7 @@ class RedisStreamSource:
         """
 
         message = self._redis_client.xreadgroup(self._group_name, self._consumer_name, {self._stream_name: ">"},
-                                                count=1, block=2000)
+                                                count=1, block=2000, noack=self._no_ack)
         assert len(message) <= 1, "At most one stream result expected"
         if len(message) >= 1 and len(message[0][1]) >= 1:
             assert len(message[0][1]) <= 1, "At most one message expected"

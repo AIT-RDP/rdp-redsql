@@ -324,6 +324,99 @@ def test_sql_sink_view_insert_duplicate_measurements(sql_engine, test_views, dup
     }), check_names=False)
 
 
+def test_sql_sink_view_insert_incremental_overwrites(sql_engine, test_views):
+    """Tests incremental insertions with overwrites - insert, then overwrite multiple times"""
+
+    config = {
+        "table": "measurements",
+        "update duplicate values": True
+    }
+    table_sink = sink.SQLTableSink(config, sql_engine, "test-sink")
+
+    # Step 1: Insert initial value
+    table_sink.insert_messages([{
+        "dp_id": 1,
+        "obs_time": pd.to_datetime("2024-12-31T00:00:00Z"),
+        "value": 10.0
+    }])
+
+    with sql_engine.connect() as con:
+        data = pd.read_sql("SELECT dp_id, valid_time, value FROM test_table_unitemporal ORDER BY dp_id", con)
+
+    pd.testing.assert_frame_equal(data, pd.DataFrame({
+        "dp_id": [1],
+        "valid_time": pd.to_datetime(["2024-12-31T00:00:00Z"]),
+        "value": [10.],
+    }), check_names=False)
+
+    # Step 2: Overwrite with new value
+    table_sink.insert_messages([{
+        "dp_id": 1,
+        "obs_time": pd.to_datetime("2024-12-31T00:00:00Z"),
+        "value": 20.0
+    }])
+
+    with sql_engine.connect() as con:
+        data = pd.read_sql("SELECT dp_id, valid_time, value FROM test_table_unitemporal ORDER BY dp_id", con)
+
+    pd.testing.assert_frame_equal(data, pd.DataFrame({
+        "dp_id": [1],
+        "valid_time": pd.to_datetime(["2024-12-31T00:00:00Z"]),
+        "value": [20.],
+    }), check_names=False)
+
+    # Step 3: Overwrite again
+    table_sink.insert_messages([{
+        "dp_id": 1,
+        "obs_time": pd.to_datetime("2024-12-31T00:00:00Z"),
+        "value": 30.0
+    }])
+
+    with sql_engine.connect() as con:
+        data = pd.read_sql("SELECT dp_id, valid_time, value FROM test_table_unitemporal ORDER BY dp_id", con)
+
+    pd.testing.assert_frame_equal(data, pd.DataFrame({
+        "dp_id": [1],
+        "valid_time": pd.to_datetime(["2024-12-31T00:00:00Z"]),
+        "value": [30.],
+    }), check_names=False)
+
+    # Step 4: Insert five duplicates in a batch - only last should win
+    table_sink.insert_messages([
+        {"dp_id": 1, "obs_time": pd.to_datetime("2024-12-31T00:00:00Z"), "value": 41.0},
+        {"dp_id": 1, "obs_time": pd.to_datetime("2024-12-31T00:00:00Z"), "value": 42.0},
+        {"dp_id": 1, "obs_time": pd.to_datetime("2024-12-31T00:00:00Z"), "value": 43.0},
+        {"dp_id": 1, "obs_time": pd.to_datetime("2024-12-31T00:00:00Z"), "value": 44.0},
+        {"dp_id": 1, "obs_time": pd.to_datetime("2024-12-31T00:00:00Z"), "value": 45.0},
+    ])
+
+    with sql_engine.connect() as con:
+        data = pd.read_sql("SELECT dp_id, valid_time, value FROM test_table_unitemporal ORDER BY dp_id", con)
+
+    # Should have value 45.0 (last one in batch)
+    pd.testing.assert_frame_equal(data, pd.DataFrame({
+        "dp_id": [1],
+        "valid_time": pd.to_datetime(["2024-12-31T00:00:00Z"]),
+        "value": [45.],
+    }), check_names=False)
+
+    # Step 5: Final overwrite to confirm it still works
+    table_sink.insert_messages([{
+        "dp_id": 1,
+        "obs_time": pd.to_datetime("2024-12-31T00:00:00Z"),
+        "value": 50.0
+    }])
+
+    with sql_engine.connect() as con:
+        data = pd.read_sql("SELECT dp_id, valid_time, value FROM test_table_unitemporal ORDER BY dp_id", con)
+
+    pd.testing.assert_frame_equal(data, pd.DataFrame({
+        "dp_id": [1],
+        "valid_time": pd.to_datetime(["2024-12-31T00:00:00Z"]),
+        "value": [50.],
+    }), check_names=False)
+
+
 def test_sql_sink_view_insert_duplicate_forecasts(sql_engine, test_views):
     """Tests the data insert on a view updating duplicate values"""
 
