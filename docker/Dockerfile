@@ -3,6 +3,8 @@ FROM ghcr.io/astral-sh/uv:python3.13-alpine
 WORKDIR /usr/redsql
 COPY pyproject.toml uv.lock ./
 
+RUN apk add --no-cache git
+
 RUN --mount=type=secret,id=repo-env,target=/kaniko/.secret.env \
     ls -la /kaniko/ && export $(cat /kaniko/.secret.env | grep -v -e '^\s*#.*' | sed 's/\r//g' | xargs) && \
     touch README.md && uv sync --compile-bytecode --no-cache --no-managed-python && \
