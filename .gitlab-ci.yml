@@ -37,10 +37,11 @@ test_python_3_13:
     REDSQL_DB_URL: "postgresql://postgres:$POSTGRES_PASSWORD@postgres:5432/redsql_testing"
 
   script:
+    - apk add --no-cache git
     - uv sync --all-groups --all-extras
     - >
-      PYTHONPATH="${PYTHONPATH}:.:test" uv run pytest 
-      --cov --cov-report term --cov-report xml:coverage.xml 
+      PYTHONPATH="${PYTHONPATH}:.:test" uv run pytest
+      --cov --cov-report term --cov-report xml:coverage.xml
       --junitxml=report.xml --log-cli-level=DEBUG test
   coverage: '/(?i)total.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/'
   artifacts:  # Collect test results
