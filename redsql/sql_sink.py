@@ -158,12 +158,12 @@ class _PrecompiledTableSink:
                            "set that enables default inference. Please consider opening a ticket if you really need to "
                            "update duplicates on that table/view.")
         elif len(columns) <= 0:
-            columns = known_views[destination_table.name]
             logger.warning(f"The destination table {destination_table.name} appears to be a view. It is assumed that "
                            f"the primary key columns are {columns}. However, consider directly writing to the "
                            "destination table instead.")
+            return known_views[destination_table.name]
 
-        return columns
+        return [col.name for col in columns]
 
     def _deduplicate_batch(self, output_data_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """

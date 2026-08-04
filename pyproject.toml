@@ -8,20 +8,14 @@ dependencies = [
     "prometheus-client>=0.24.1",
     "psycopg2-binary>=2.9.11",
     "pydantic>=2.12.5",
-    "pyrdp-commons==0.0.0.post75.dev0+c27aa07",
+    "pyrdp-commons @ git+https://github.com/AIT-RDP/pyrdp-commons.git@development",
     "python-dateutil>=2.9.0.post0",
     "redis>=7.2.0",
     "sqlalchemy>=2.0.46",
 ]
-
-[[tool.uv.index]]
-  name="rdp-commons"
-  url = "https://gitlab-intern.ait.ac.at/api/v4/projects/3611/packages/pypi/simple"
-  authenticate = "always"
 
 [dependency-groups]
 dev = [
     "pytest>=9.0.2",
     "pytest-cov>=7.0.0",
 ]
-
